@@ -8,7 +8,8 @@ const demoDirectoryImages: EditorDirectoryImage[] = [
     extension: 'jpg',
     width: 1920,
     height: 1080,
-    sizeBytes: 428512
+    sizeBytes: 428512,
+    thumbnailDataUrl: 'data:image/jpeg;base64,demo-a'
   },
   {
     index: 1,
@@ -17,7 +18,8 @@ const demoDirectoryImages: EditorDirectoryImage[] = [
     extension: 'png',
     width: 1280,
     height: 720,
-    sizeBytes: 285104
+    sizeBytes: 285104,
+    thumbnailDataUrl: 'data:image/png;base64,demo-b'
   },
   {
     index: 2,
@@ -26,7 +28,8 @@ const demoDirectoryImages: EditorDirectoryImage[] = [
     extension: 'webp',
     width: 1600,
     height: 900,
-    sizeBytes: 319872
+    sizeBytes: 319872,
+    thumbnailDataUrl: 'data:image/webp;base64,demo-c'
   }
 ];
 
