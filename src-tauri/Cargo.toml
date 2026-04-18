@@ -1,0 +1,22 @@
+[package]
+name = "image-batch-helper"
+version = "0.1.0"
+description = "图片批量处理助手"
+authors = ["Claude Code"]
+edition = "2021"
+
+[lib]
+name = "image_batch_helper_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2.0.0", features = [] }
+
+[dependencies]
+anyhow = "1"
+base64 = "0.22"
+image = { version = "0.25", default-features = true, features = ["jpeg", "png", "webp", "bmp"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tauri = { version = "2.0.0", features = [] }
+tauri-plugin-dialog = "2.0.0"
