@@ -5,6 +5,7 @@ import {
   type AdjustmentParams,
   type EditorDirectoryImage,
   type EditorImageSummary,
+  type FilterType,
   type PendingSwitchTarget
 } from '../types/editor';
 
@@ -19,13 +20,13 @@ type EditorStore = {
   directoryImages: EditorDirectoryImage[];
   currentIndex: number;
   adjustments: AdjustmentParams;
-  copiedAdjustments: AdjustmentParams | null;
   hasUnsavedChanges: boolean;
   pendingSwitchTarget: PendingSwitchTarget | null;
   openImages: (payload: OpenImagesPayload) => void;
   updateAdjustment: (key: AdjustmentKey, value: number) => void;
-  copyAdjustments: () => void;
-  pasteAdjustments: () => void;
+  updateFilter: (filterType: FilterType) => void;
+  updateFilterIntensity: (value: number) => void;
+  resetFilters: () => void;
   markSaved: () => void;
   requestSwitch: (target: PendingSwitchTarget) => void;
   confirmSwitch: () => void;
@@ -37,6 +38,7 @@ type EditorStore = {
 };
 
 const clampAdjustment = (value: number) => Math.max(-100, Math.min(100, value));
+const clampFilterIntensity = (value: number) => Math.max(0, Math.min(100, value));
 
 const buildImageFromIndex = (images: EditorDirectoryImage[], index: number) => {
   const target = images[index];
@@ -54,7 +56,6 @@ const initialState = {
   directoryImages: [],
   currentIndex: -1,
   adjustments: defaultAdjustmentParams,
-  copiedAdjustments: null,
   hasUnsavedChanges: false,
   pendingSwitchTarget: null
 };
@@ -75,19 +76,32 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
       adjustments: { ...state.adjustments, [key]: clampAdjustment(value) },
       hasUnsavedChanges: true
     })),
-  copyAdjustments: () => set((state) => ({ copiedAdjustments: state.adjustments })),
-  pasteAdjustments: () => {
-    const copiedAdjustments = get().copiedAdjustments;
-
-    if (!copiedAdjustments) {
-      return;
-    }
-
-    set({
-      adjustments: copiedAdjustments,
+  updateFilter: (filterType) =>
+    set((state) => ({
+      adjustments: {
+        ...state.adjustments,
+        filterType,
+        filterIntensity: filterType === 'none' ? 0 : state.adjustments.filterIntensity || 40
+      },
       hasUnsavedChanges: true
-    });
-  },
+    })),
+  updateFilterIntensity: (value) =>
+    set((state) => ({
+      adjustments: {
+        ...state.adjustments,
+        filterIntensity: clampFilterIntensity(value)
+      },
+      hasUnsavedChanges: true
+    })),
+  resetFilters: () =>
+    set((state) => ({
+      adjustments: {
+        ...state.adjustments,
+        filterType: 'none',
+        filterIntensity: 0
+      },
+      hasUnsavedChanges: true
+    })),
   markSaved: () => set({ hasUnsavedChanges: false, pendingSwitchTarget: null }),
   requestSwitch: (target) => {
     if (get().hasUnsavedChanges) {

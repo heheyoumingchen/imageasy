@@ -1,9 +1,12 @@
 export type AdjustmentKey = 'brightness' | 'contrast' | 'saturation';
+export type FilterType = 'none' | 'grayscale' | 'warm' | 'cool' | 'vintage';
 
 export type AdjustmentParams = {
   brightness: number;
   contrast: number;
   saturation: number;
+  filterType: FilterType;
+  filterIntensity: number;
 };
 
 export type EditorImageSummary = {
@@ -61,7 +64,6 @@ export type EditorSessionState = {
   directoryImages: EditorDirectoryImage[];
   currentIndex: number;
   adjustments: AdjustmentParams;
-  copiedAdjustments: AdjustmentParams | null;
   hasUnsavedChanges: boolean;
   pendingSwitchTarget: PendingSwitchTarget | null;
 };
@@ -69,5 +71,7 @@ export type EditorSessionState = {
 export const defaultAdjustmentParams: AdjustmentParams = {
   brightness: 0,
   contrast: 0,
-  saturation: 0
+  saturation: 0,
+  filterType: 'none',
+  filterIntensity: 0
 };
