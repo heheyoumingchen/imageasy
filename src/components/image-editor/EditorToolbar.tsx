@@ -1,13 +1,10 @@
 type EditorToolbarProps = {
   canGoPrevious: boolean;
   canGoNext: boolean;
-  hasCopiedAdjustments: boolean;
   hasUnsavedChanges: boolean;
   onOpenImage: () => void;
   onPrevious: () => void;
   onNext: () => void;
-  onCopy: () => void;
-  onPaste: () => void;
   onSave: () => void;
 };
 
@@ -17,13 +14,10 @@ const toolbarButtonClass =
 const EditorToolbar = ({
   canGoPrevious,
   canGoNext,
-  hasCopiedAdjustments,
   hasUnsavedChanges,
   onOpenImage,
   onPrevious,
   onNext,
-  onCopy,
-  onPaste,
   onSave
 }: EditorToolbarProps) => {
   return (
@@ -31,7 +25,7 @@ const EditorToolbar = ({
       <div className="mb-3 flex items-center justify-between gap-3">
         <div>
           <h3 className="text-base font-semibold text-slate-50">编辑工具栏</h3>
-          <p className="mt-1 text-sm text-slate-400">先从这里打开图片，再进行切图、复制参数和保存。</p>
+          <p className="mt-1 text-sm text-slate-400">先从这里打开图片，再进行切图和保存。</p>
         </div>
       </div>
 
@@ -44,12 +38,6 @@ const EditorToolbar = ({
         </button>
         <button type="button" className={toolbarButtonClass} onClick={onNext} disabled={!canGoNext}>
           下一张
-        </button>
-        <button type="button" className={toolbarButtonClass} onClick={onCopy}>
-          复制参数
-        </button>
-        <button type="button" className={toolbarButtonClass} onClick={onPaste} disabled={!hasCopiedAdjustments}>
-          粘贴参数
         </button>
         <button type="button" className={toolbarButtonClass} onClick={onSave} disabled={!hasUnsavedChanges}>
           保存 JPG

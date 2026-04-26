@@ -48,13 +48,10 @@ const ImageEditorPage = () => {
     currentIndex,
     directoryImages,
     adjustments,
-    copiedAdjustments,
     hasUnsavedChanges,
     pendingSwitchTarget,
     openImages,
     updateAdjustment,
-    copyAdjustments,
-    pasteAdjustments,
     markSaved,
     requestSwitch,
     confirmSwitch,
@@ -185,13 +182,10 @@ const ImageEditorPage = () => {
       <EditorToolbar
         canGoPrevious={!isOpening && !isSaving && currentIndex > 0}
         canGoNext={!isOpening && !isSaving && currentIndex >= 0 && currentIndex < directoryImages.length - 1}
-        hasCopiedAdjustments={Boolean(copiedAdjustments)}
         hasUnsavedChanges={hasUnsavedChanges}
         onOpenImage={handleOpenImage}
         onPrevious={goToPrevious}
         onNext={goToNext}
-        onCopy={copyAdjustments}
-        onPaste={pasteAdjustments}
         onSave={handleSave}
       />
 
