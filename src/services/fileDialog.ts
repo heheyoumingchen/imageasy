@@ -2,6 +2,7 @@ import { open, save } from '@tauri-apps/plugin-dialog';
 
 const imageFilters = [{ name: 'Images', extensions: ['jpg', 'jpeg', 'png', 'webp', 'bmp'] }];
 const conversionFilters = [{ name: 'Supported files', extensions: ['jpg', 'jpeg', 'png', 'webp', 'bmp', 'gif', 'pdf', 'docx'] }];
+const extractionFilters = [{ name: 'Documents', extensions: ['pdf', 'docx'] }];
 
 export const openImageFile = async () => {
   const selected = await open({
@@ -39,6 +40,16 @@ export const openConversionDirectory = async () => {
   });
 
   return typeof selected === 'string' ? selected : null;
+};
+
+export const openExtractionDocuments = async () => {
+  const selected = await open({
+    directory: false,
+    multiple: true,
+    filters: extractionFilters
+  });
+
+  return Array.isArray(selected) ? selected.filter((value): value is string => typeof value === 'string') : [];
 };
 
 export const chooseOutputDirectory = async () => {

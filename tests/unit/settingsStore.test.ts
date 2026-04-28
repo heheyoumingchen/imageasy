@@ -1,57 +1,82 @@
-import { beforeEach, describe, expect, it } from 'vitest';
-import { createSettingsStore, SETTINGS_STORAGE_KEY } from '../../src/stores/settingsStore';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { createSettingsStore, DEFAULT_SETTINGS } from '../../src/stores/settingsStore';
+
+const { loadSettings, saveSettings } = vi.hoisted(() => ({
+  loadSettings: vi.fn(),
+  saveSettings: vi.fn()
+}));
+
+vi.mock('../../src/services/settingsCommands', () => ({
+  loadSettings,
+  saveSettings
+}));
 
 describe('settingsStore', () => {
   beforeEach(() => {
-    window.localStorage.clear();
+    vi.clearAllMocks();
   });
 
-  it('uses defaults when no persisted settings exist', () => {
+  it('uses defaults before settings are loaded from Tauri', () => {
     const store = createSettingsStore();
 
-    expect(store.getState().theme).toBe('dark');
-    expect(store.getState().language).toBe('zh-CN');
-    expect(store.getState().maxConcurrency).toBe(2);
-    expect(store.getState().outputDirectoryStrategy).toBe('same-as-source');
-    expect(store.getState().rememberLastParams).toBe(false);
+    expect(store.getState()).toEqual(expect.objectContaining(DEFAULT_SETTINGS));
+    expect(store.getState().isLoading).toBe(false);
   });
 
-  it('writes updated settings to localStorage', () => {
+  it('loads persisted settings through the Tauri settings command', async () => {
+    loadSettings.mockResolvedValue({
+      theme: 'dark',
+      language: 'zh-CN',
+      maxConcurrency: 6,
+      outputDirectoryStrategy: 'custom',
+      rememberLastParams: true
+    });
     const store = createSettingsStore();
 
-    store.getState().updateSettings({
+    await store.getState().load();
+
+    expect(loadSettings).toHaveBeenCalledTimes(1);
+    expect(store.getState()).toEqual(
+      expect.objectContaining({
+        maxConcurrency: 6,
+        outputDirectoryStrategy: 'custom',
+        rememberLastParams: true,
+        isLoading: false,
+        errorMessage: null
+      })
+    );
+  });
+
+  it('saves updated settings through the Tauri settings command', async () => {
+    saveSettings.mockResolvedValue({
+      theme: 'dark',
+      language: 'zh-CN',
+      maxConcurrency: 4,
+      outputDirectoryStrategy: 'custom',
+      rememberLastParams: true
+    });
+    const store = createSettingsStore();
+
+    await store.getState().updateSettings({
       maxConcurrency: 4,
       outputDirectoryStrategy: 'custom',
       rememberLastParams: true
     });
 
-    expect(window.localStorage.getItem(SETTINGS_STORAGE_KEY)).toBe(
-      JSON.stringify({
-        theme: 'dark',
-        language: 'zh-CN',
+    expect(saveSettings).toHaveBeenCalledWith({
+      theme: 'dark',
+      language: 'zh-CN',
+      maxConcurrency: 4,
+      outputDirectoryStrategy: 'custom',
+      rememberLastParams: true
+    });
+    expect(store.getState()).toEqual(
+      expect.objectContaining({
         maxConcurrency: 4,
         outputDirectoryStrategy: 'custom',
-        rememberLastParams: true
+        rememberLastParams: true,
+        errorMessage: null
       })
     );
-  });
-
-  it('hydrates persisted values during store creation', () => {
-    window.localStorage.setItem(
-      SETTINGS_STORAGE_KEY,
-      JSON.stringify({
-        theme: 'dark',
-        language: 'zh-CN',
-        maxConcurrency: 6,
-        outputDirectoryStrategy: 'custom',
-        rememberLastParams: true
-      })
-    );
-
-    const store = createSettingsStore();
-
-    expect(store.getState().maxConcurrency).toBe(6);
-    expect(store.getState().outputDirectoryStrategy).toBe('custom');
-    expect(store.getState().rememberLastParams).toBe(true);
   });
 });

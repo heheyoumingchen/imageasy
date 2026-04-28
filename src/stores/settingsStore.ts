@@ -1,8 +1,9 @@
 import { createStore } from 'zustand/vanilla';
+import { loadSettings, saveSettings } from '../services/settingsCommands';
 
 export type OutputDirectoryStrategy = 'same-as-source' | 'custom';
 
-type PersistedSettings = {
+export type PersistedSettings = {
   theme: 'dark';
   language: 'zh-CN';
   maxConcurrency: number;
@@ -11,12 +12,13 @@ type PersistedSettings = {
 };
 
 export type SettingsState = PersistedSettings & {
-  updateSettings: (partial: Partial<PersistedSettings>) => void;
+  isLoading: boolean;
+  errorMessage: string | null;
+  load: () => Promise<void>;
+  updateSettings: (partial: Partial<PersistedSettings>) => Promise<void>;
 };
 
-export const SETTINGS_STORAGE_KEY = 'image-batch-helper:settings';
-
-const DEFAULT_SETTINGS: PersistedSettings = {
+export const DEFAULT_SETTINGS: PersistedSettings = {
   theme: 'dark',
   language: 'zh-CN',
   maxConcurrency: 2,
@@ -24,45 +26,39 @@ const DEFAULT_SETTINGS: PersistedSettings = {
   rememberLastParams: false
 };
 
-const readStoredSettings = (): Partial<PersistedSettings> => {
-  if (typeof window === 'undefined') {
-    return {};
-  }
-
-  const raw = window.localStorage.getItem(SETTINGS_STORAGE_KEY);
-
-  if (!raw) {
-    return {};
-  }
-
-  return JSON.parse(raw) as Partial<PersistedSettings>;
-};
+const toErrorMessage = (error: unknown) => (error instanceof Error ? error.message : String(error));
 
 export const createSettingsStore = () => {
-  const initialState: PersistedSettings = {
+  return createStore<SettingsState>((set, get) => ({
     ...DEFAULT_SETTINGS,
-    ...readStoredSettings()
-  };
+    isLoading: false,
+    errorMessage: null,
+    load: async () => {
+      set({ isLoading: true, errorMessage: null });
 
-  return createStore<SettingsState>((set) => ({
-    ...initialState,
-    updateSettings: (partial) => {
-      set((state) => {
-        const nextState: PersistedSettings = {
-          theme: state.theme,
-          language: state.language,
-          maxConcurrency: partial.maxConcurrency ?? state.maxConcurrency,
-          outputDirectoryStrategy: partial.outputDirectoryStrategy ?? state.outputDirectoryStrategy,
-          rememberLastParams: partial.rememberLastParams ?? state.rememberLastParams
-        };
+      try {
+        const settings = await loadSettings();
+        set({ ...settings, isLoading: false, errorMessage: null });
+      } catch (error) {
+        set({ isLoading: false, errorMessage: toErrorMessage(error) });
+      }
+    },
+    updateSettings: async (partial) => {
+      const state = get();
+      const nextSettings: PersistedSettings = {
+        theme: state.theme,
+        language: state.language,
+        maxConcurrency: partial.maxConcurrency ?? state.maxConcurrency,
+        outputDirectoryStrategy: partial.outputDirectoryStrategy ?? state.outputDirectoryStrategy,
+        rememberLastParams: partial.rememberLastParams ?? state.rememberLastParams
+      };
 
-        window.localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(nextState));
-
-        return {
-          ...state,
-          ...nextState
-        };
-      });
+      try {
+        const savedSettings = await saveSettings(nextSettings);
+        set({ ...savedSettings, errorMessage: null });
+      } catch (error) {
+        set({ errorMessage: toErrorMessage(error) });
+      }
     }
   }));
 };
