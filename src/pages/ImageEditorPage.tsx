@@ -1,14 +1,14 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import EditorRightPanel from '../components/image-editor/EditorRightPanel';
-import EditorStatusBar from '../components/image-editor/EditorStatusBar';
-import EditorToolbar from '../components/image-editor/EditorToolbar';
-import ImagePreviewCanvas from '../components/image-editor/ImagePreviewCanvas';
-import ThumbnailSidebar from '../components/image-editor/ThumbnailSidebar';
+import EditorBottomStatusBar from '../components/image-editor/EditorBottomStatusBar';
+import EditorFilmstrip from '../components/image-editor/EditorFilmstrip';
+import EditorInspector from '../components/image-editor/EditorInspector';
+import EditorPreviewStage from '../components/image-editor/EditorPreviewStage';
+import EditorTopActionBar from '../components/image-editor/EditorTopActionBar';
 import UnsavedChangeDialog from '../components/image-editor/UnsavedChangeDialog';
 import { generateImagePreview, openImageSession, saveImageAsJpg } from '../services/editorCommands';
 import { chooseJpgSavePath, openImageFile } from '../services/fileDialog';
 import { useEditorStore } from '../stores/editorStore';
-import type { AdjustmentParams } from '../types/editor';
+import type { AdjustmentKey, AdjustmentParams } from '../types/editor';
 
 const buildDefaultSavePath = (sourcePath: string) => {
   const normalized = sourcePath.replace(/\\/g, '/');
@@ -36,7 +36,6 @@ const getErrorMessage = (error: unknown, fallback: string) => {
       return serialized;
     }
   } catch {
-    // ignore serialization failure
   }
 
   return fallback;
@@ -48,10 +47,20 @@ const ImageEditorPage = () => {
     currentIndex,
     directoryImages,
     adjustments,
+    past,
+    future,
     hasUnsavedChanges,
     pendingSwitchTarget,
     openImages,
     updateAdjustment,
+    updateFilter,
+    updateFilterIntensity,
+    resetFilters,
+    rotateLeft,
+    rotateRight,
+    applyCrop,
+    undo,
+    redo,
     markSaved,
     requestSwitch,
     confirmSwitch,
@@ -150,7 +159,7 @@ const ImageEditorPage = () => {
         sourcePath: currentImage.path,
         targetPath,
         adjustments,
-        quality: 90
+        quality: adjustments.quality
       });
 
       markSaved();
@@ -161,8 +170,16 @@ const ImageEditorPage = () => {
     }
   };
 
-  const handleChangeAdjustment = (key: keyof AdjustmentParams, value: number) => {
+  const handleChangeAdjustment = (key: AdjustmentKey, value: number) => {
     updateAdjustment(key, value);
+  };
+
+  const handleChangeFilter = (filterType: AdjustmentParams['filterType']) => {
+    updateFilter(filterType);
+  };
+
+  const handleChangeFilterIntensity = (value: number) => {
+    updateFilterIntensity(value);
   };
 
   const toolbarDisabledLabel = useMemo(() => {
@@ -178,50 +195,61 @@ const ImageEditorPage = () => {
   }, [isOpening, isSaving]);
 
   return (
-    <section>
-      <EditorToolbar
-        canGoPrevious={!isOpening && !isSaving && currentIndex > 0}
-        canGoNext={!isOpening && !isSaving && currentIndex >= 0 && currentIndex < directoryImages.length - 1}
+    <section className="min-h-full rounded-[24px] border border-[#ececf2] bg-[#f8f8fb] p-3.5 text-[#2f3440] shadow-[0_12px_30px_rgba(23,28,41,0.05)]">
+      <EditorTopActionBar
         hasUnsavedChanges={hasUnsavedChanges}
+        canUndo={!isOpening && !isSaving && past.length > 0}
+        canRedo={!isOpening && !isSaving && future.length > 0}
         onOpenImage={handleOpenImage}
-        onPrevious={goToPrevious}
-        onNext={goToNext}
+        onUndo={undo}
+        onRedo={redo}
         onSave={handleSave}
       />
 
-      {toolbarDisabledLabel ? <p className="mb-4 text-sm text-slate-400">{toolbarDisabledLabel}</p> : null}
-      {pageError ? <p className="mb-4 rounded-2xl border border-rose-500/30 bg-rose-500/10 px-4 py-3 text-sm text-rose-200">{pageError}</p> : null}
+      {toolbarDisabledLabel ? <p className="mb-4 px-1 text-sm text-[#9ca2ae]">{toolbarDisabledLabel}</p> : null}
+      {pageError ? (
+        <p className="mb-4 rounded-[18px] border border-[#ffd3df] bg-[#fff3f7] px-4 py-3 text-sm text-[#d94d80]">{pageError}</p>
+      ) : null}
 
-      <div className="grid gap-6 xl:grid-cols-[280px_minmax(0,1fr)_320px]">
-        <ThumbnailSidebar
-          images={directoryImages}
-          currentIndex={currentIndex}
-          onSelect={(index) => requestSwitch({ index, reason: 'thumbnail' })}
-        />
-
-        <ImagePreviewCanvas
-          image={currentImage}
-          adjustments={adjustments}
-          previewUrl={previewUrl}
-          isLoading={isPreviewLoading}
-          error={pageError}
-        />
-
-        <div className="space-y-6">
-          <EditorRightPanel adjustments={adjustments} onChange={handleChangeAdjustment} />
-          <EditorStatusBar
+      <div className="grid gap-4.5 xl:grid-cols-[minmax(0,1fr)_296px]">
+        <section aria-label="图片编辑主舞台" className="rounded-[20px] border border-[#ececf2] bg-[#fbfbfd] p-4 shadow-[0_10px_24px_rgba(23,28,41,0.04)]">
+          <EditorPreviewStage
             image={currentImage}
-            totalImages={directoryImages.length}
-            hasUnsavedChanges={hasUnsavedChanges}
+            adjustments={adjustments}
+            previewUrl={previewUrl}
+            isLoading={isPreviewLoading}
+            error={pageError}
+            onRotateLeft={rotateLeft}
+            onRotateRight={rotateRight}
+            onApplyCrop={applyCrop}
           />
+
+          <div className="mt-4">
+            <EditorFilmstrip
+              images={directoryImages}
+              currentIndex={currentIndex}
+              canGoPrevious={!isOpening && !isSaving && currentIndex > 0}
+              canGoNext={!isOpening && !isSaving && currentIndex >= 0 && currentIndex < directoryImages.length - 1}
+              onPrevious={goToPrevious}
+              onNext={goToNext}
+              onSelect={(index) => requestSwitch({ index, reason: 'thumbnail' })}
+            />
+          </div>
+        </section>
+
+        <div className="space-y-5">
+          <EditorInspector
+            adjustments={adjustments}
+            onChange={handleChangeAdjustment}
+            onFilterChange={handleChangeFilter}
+            onFilterIntensityChange={handleChangeFilterIntensity}
+            onResetFilters={resetFilters}
+          />
+          <EditorBottomStatusBar image={currentImage} currentIndex={currentIndex} totalImages={directoryImages.length} />
         </div>
       </div>
 
-      <UnsavedChangeDialog
-        open={Boolean(pendingSwitchTarget)}
-        onConfirm={confirmSwitch}
-        onCancel={cancelSwitch}
-      />
+      <UnsavedChangeDialog open={Boolean(pendingSwitchTarget)} onConfirm={confirmSwitch} onCancel={cancelSwitch} />
     </section>
   );
 };

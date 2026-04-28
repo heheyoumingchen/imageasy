@@ -1,6 +1,6 @@
 use anyhow::{Context, Result};
 use base64::{engine::general_purpose::STANDARD, Engine as _};
-use image::{codecs::jpeg::JpegEncoder, imageops::FilterType, DynamicImage, GenericImageView, Rgba};
+use image::{codecs::jpeg::JpegEncoder, imageops, imageops::FilterType, DynamicImage, GenericImageView, Rgba};
 use serde::{Deserialize, Serialize};
 use std::{
     collections::HashMap,
@@ -18,10 +18,26 @@ static PREVIEW_CACHE: OnceLock<Mutex<HashMap<PreviewCacheKey, DynamicImage>>> = 
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct CropRect {
+    pub x: u32,
+    pub y: u32,
+    pub width: u32,
+    pub height: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct AdjustmentParams {
     pub brightness: i32,
     pub contrast: i32,
     pub saturation: i32,
+    pub sharpen: i32,
+    pub clarity: i32,
+    pub quality: i32,
+    pub filter_type: String,
+    pub filter_intensity: i32,
+    pub rotation: i32,
+    pub crop: Option<CropRect>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -179,7 +195,9 @@ fn save_image_as_jpg_impl(request: SaveImageAsJpgRequest) -> Result<SaveImageAsJ
             .with_context(|| format!("无法创建输出目录: {}", parent.display()))?;
     }
 
-    let quality = request.quality.unwrap_or(90);
+    let quality = request
+        .quality
+        .unwrap_or_else(|| request.adjustments.quality.clamp(1, 100) as u8);
     let file = fs::File::create(&target_path)
         .with_context(|| format!("无法创建输出文件: {}", target_path.display()))?;
     let mut writer = std::io::BufWriter::new(file);
@@ -197,15 +215,133 @@ fn save_image_as_jpg_impl(request: SaveImageAsJpgRequest) -> Result<SaveImageAsJ
 }
 
 fn process_preview_image(source: DynamicImage, adjustments: &AdjustmentParams) -> DynamicImage {
-    let mut image = source.brighten(adjustments.brightness);
-    image = image.adjust_contrast(adjustments.contrast as f32);
-    apply_saturation(image, adjustments.saturation as f32 / 100.0)
+    apply_adjustments(source, adjustments)
 }
 
 fn process_full_image(source: DynamicImage, adjustments: &AdjustmentParams) -> DynamicImage {
+    apply_adjustments(source, adjustments)
+}
+
+fn apply_adjustments(source: DynamicImage, adjustments: &AdjustmentParams) -> DynamicImage {
     let mut image = source.brighten(adjustments.brightness);
     image = image.adjust_contrast(adjustments.contrast as f32);
-    apply_saturation(image, adjustments.saturation as f32 / 100.0)
+    image = apply_saturation(image, adjustments.saturation as f32 / 100.0);
+    image = apply_sharpen(image, adjustments.sharpen as f32 / 100.0);
+    image = apply_clarity(image, adjustments.clarity as f32 / 100.0);
+    image = apply_filter(image, &adjustments.filter_type, adjustments.filter_intensity as f32 / 100.0);
+    image = apply_rotation(image, adjustments.rotation);
+    apply_crop(image, adjustments.crop.as_ref())
+}
+
+fn apply_filter(image: DynamicImage, filter_type: &str, intensity: f32) -> DynamicImage {
+    let amount = intensity.clamp(0.0, 1.0);
+
+    match filter_type {
+        "none" => image,
+        "grayscale" => apply_grayscale_filter(image, amount),
+        "warm" => apply_channel_mix_filter(image, amount, 28.0, 10.0, -24.0),
+        "cool" => apply_channel_mix_filter(image, amount, -18.0, 6.0, 28.0),
+        "vintage" => apply_vintage_filter(image, amount),
+        _ => image,
+    }
+}
+
+fn apply_grayscale_filter(image: DynamicImage, amount: f32) -> DynamicImage {
+    let mut rgba = image.to_rgba8();
+    for pixel in rgba.pixels_mut() {
+        let [r, g, b, a] = pixel.0;
+        let gray = (0.299 * r as f32 + 0.587 * g as f32 + 0.114 * b as f32).round();
+        let nr = mix_channel(r as f32, gray, amount);
+        let ng = mix_channel(g as f32, gray, amount);
+        let nb = mix_channel(b as f32, gray, amount);
+        *pixel = Rgba([nr, ng, nb, a]);
+    }
+    DynamicImage::ImageRgba8(rgba)
+}
+
+fn apply_channel_mix_filter(image: DynamicImage, amount: f32, red_shift: f32, green_shift: f32, blue_shift: f32) -> DynamicImage {
+    let mut rgba = image.to_rgba8();
+    for pixel in rgba.pixels_mut() {
+        let [r, g, b, a] = pixel.0;
+        let nr = shift_channel(r, red_shift, amount);
+        let ng = shift_channel(g, green_shift, amount);
+        let nb = shift_channel(b, blue_shift, amount);
+        *pixel = Rgba([nr, ng, nb, a]);
+    }
+    DynamicImage::ImageRgba8(rgba)
+}
+
+fn apply_vintage_filter(image: DynamicImage, amount: f32) -> DynamicImage {
+    let image = apply_grayscale_filter(image, amount * 0.35);
+    let image = apply_channel_mix_filter(image, amount, 24.0, 8.0, -18.0);
+    apply_saturation(image, -amount * 0.2)
+}
+
+fn apply_sharpen(image: DynamicImage, amount: f32) -> DynamicImage {
+    if amount.abs() < f32::EPSILON {
+        return image;
+    }
+
+    let sigma = (1.0 + amount.abs() * 1.5).max(0.1);
+    let threshold = (amount.abs() * 12.0).round() as i32;
+    DynamicImage::ImageRgba8(imageops::unsharpen(&image.to_rgba8(), sigma, threshold))
+}
+
+fn apply_clarity(image: DynamicImage, amount: f32) -> DynamicImage {
+    if amount.abs() < f32::EPSILON {
+        return image;
+    }
+
+    let blurred = image.blur(1.6).to_rgba8();
+    let mut rgba = image.to_rgba8();
+    let mix_amount = amount.clamp(-1.0, 1.0) * 0.6;
+
+    for (pixel, blurred_pixel) in rgba.pixels_mut().zip(blurred.pixels()) {
+        let [r, g, b, a] = pixel.0;
+        let [br, bg, bb, _] = blurred_pixel.0;
+
+        let nr = ((r as f32) + (r as f32 - br as f32) * mix_amount).round().clamp(0.0, 255.0) as u8;
+        let ng = ((g as f32) + (g as f32 - bg as f32) * mix_amount).round().clamp(0.0, 255.0) as u8;
+        let nb = ((b as f32) + (b as f32 - bb as f32) * mix_amount).round().clamp(0.0, 255.0) as u8;
+        *pixel = Rgba([nr, ng, nb, a]);
+    }
+
+    DynamicImage::ImageRgba8(rgba)
+}
+
+fn apply_rotation(image: DynamicImage, rotation: i32) -> DynamicImage {
+    match rotation.rem_euclid(360) {
+        90 => image.rotate90(),
+        180 => image.rotate180(),
+        270 => image.rotate270(),
+        _ => image,
+    }
+}
+
+fn apply_crop(image: DynamicImage, crop: Option<&CropRect>) -> DynamicImage {
+    let Some(crop) = crop else {
+        return image;
+    };
+
+    let width = image.width();
+    let height = image.height();
+
+    if crop.width == 0 || crop.height == 0 || crop.x >= width || crop.y >= height {
+        return image;
+    }
+
+    let crop_width = crop.width.min(width.saturating_sub(crop.x));
+    let crop_height = crop.height.min(height.saturating_sub(crop.y));
+
+    image.crop_imm(crop.x, crop.y, crop_width, crop_height)
+}
+
+fn mix_channel(source: f32, target: f32, amount: f32) -> u8 {
+    (source + (target - source) * amount).round().clamp(0.0, 255.0) as u8
+}
+
+fn shift_channel(source: u8, shift: f32, amount: f32) -> u8 {
+    (source as f32 + shift * amount).round().clamp(0.0, 255.0) as u8
 }
 
 fn get_or_prepare_preview_image(path: &str, width: u32, height: u32) -> Result<DynamicImage> {

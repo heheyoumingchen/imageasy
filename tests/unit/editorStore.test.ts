@@ -42,35 +42,74 @@ describe('editorStore', () => {
     useEditorStore.getState().reset();
   });
 
-  it('updates filter settings and marks the editor as dirty', () => {
+  it('uses 100 as the default intensity for non-none filters', () => {
     openDemoImages();
 
     useEditorStore.getState().updateFilter('warm');
-    useEditorStore.getState().updateFilterIntensity(60);
 
     expect(useEditorStore.getState().adjustments.filterType).toBe('warm');
-    expect(useEditorStore.getState().adjustments.filterIntensity).toBe(60);
-    expect(useEditorStore.getState().hasUnsavedChanges).toBe(true);
+    expect(useEditorStore.getState().adjustments.filterIntensity).toBe(100);
   });
 
-  it('resets only filter settings without changing basic adjustments', () => {
+  it('updates the basic panel values including sharpen clarity and quality', () => {
     openDemoImages();
 
     useEditorStore.getState().updateAdjustment('brightness', 20);
-    useEditorStore.getState().updateFilter('vintage');
-    useEditorStore.getState().updateFilterIntensity(45);
-    useEditorStore.getState().resetFilters();
+    useEditorStore.getState().updateAdjustment('sharpen', 35);
+    useEditorStore.getState().updateAdjustment('clarity', 40);
+    useEditorStore.getState().updateAdjustment('quality', 75);
 
-    expect(useEditorStore.getState().adjustments.brightness).toBe(20);
-    expect(useEditorStore.getState().adjustments.filterType).toBe('none');
-    expect(useEditorStore.getState().adjustments.filterIntensity).toBe(0);
+    expect(useEditorStore.getState().adjustments).toEqual(
+      expect.objectContaining({
+        brightness: 20,
+        sharpen: 35,
+        clarity: 40,
+        quality: 75
+      })
+    );
   });
 
-  it('does not expose copy or paste actions in the latest scope', () => {
-    const state = useEditorStore.getState() as Record<string, unknown>;
+  it('tracks history for undo and redo across all adjustment changes', () => {
+    openDemoImages();
 
-    expect('copyAdjustments' in state).toBe(false);
-    expect('pasteAdjustments' in state).toBe(false);
-    expect('copiedAdjustments' in state).toBe(false);
+    useEditorStore.getState().updateAdjustment('contrast', 15);
+    useEditorStore.getState().updateFilter('cool');
+    useEditorStore.getState().rotateRight();
+
+    expect(useEditorStore.getState().past).toHaveLength(3);
+    expect(useEditorStore.getState().adjustments.rotation).toBe(90);
+
+    useEditorStore.getState().undo();
+    expect(useEditorStore.getState().adjustments.rotation).toBe(0);
+    expect(useEditorStore.getState().future).toHaveLength(1);
+
+    useEditorStore.getState().redo();
+    expect(useEditorStore.getState().adjustments.rotation).toBe(90);
+  });
+
+  it('applies and clears crop rectangles through the history stack', () => {
+    openDemoImages();
+
+    useEditorStore.getState().applyCrop({ x: 20, y: 30, width: 200, height: 160 });
+    expect(useEditorStore.getState().adjustments.crop).toEqual({ x: 20, y: 30, width: 200, height: 160 });
+
+    useEditorStore.getState().clearCrop();
+    expect(useEditorStore.getState().adjustments.crop).toBeNull();
+
+    useEditorStore.getState().undo();
+    expect(useEditorStore.getState().adjustments.crop).toEqual({ x: 20, y: 30, width: 200, height: 160 });
+  });
+
+  it('clears history when switching to another image', () => {
+    openDemoImages();
+
+    useEditorStore.getState().updateAdjustment('saturation', 12);
+    useEditorStore.getState().rotateLeft();
+    useEditorStore.getState().goToNext();
+    useEditorStore.getState().confirmSwitch();
+
+    expect(useEditorStore.getState().past).toHaveLength(0);
+    expect(useEditorStore.getState().future).toHaveLength(0);
+    expect(useEditorStore.getState().adjustments.rotation).toBe(0);
   });
 });
