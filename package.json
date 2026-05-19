@@ -9,8 +9,9 @@
     "build": "tsc --noEmit && vite build",
     "test": "vitest run",
     "test:watch": "vitest",
+    "stage:pdfium": "node scripts/stage-pdfium.mjs",
     "tauri:dev": "tauri dev",
-    "tauri:build": "tauri build"
+    "tauri:build": "pnpm stage:pdfium && tauri build"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.0.0",

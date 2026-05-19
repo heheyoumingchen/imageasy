@@ -5,3 +5,4 @@ dist/
 dist-electron/
 src-tauri/target/
 src-tauri/settings.json
+src-tauri/pdfium/
