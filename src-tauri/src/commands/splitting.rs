@@ -45,8 +45,9 @@ pub struct SplitImageFileRequest {
     pub source_path: String,
     pub output_directory: String,
     pub output_format: String,
-    pub split_direction: String,
-    pub ratio: u32,
+    pub columns: u32,
+    pub rows: u32,
+    pub quality: u8,
     pub naming_pattern: String,
 }
 
@@ -56,25 +57,6 @@ pub struct SplitImageFileResult {
     pub output_paths: Vec<String>,
     pub split_count: u32,
     pub skipped_count: u32,
-}
-
-#[derive(Debug, Clone, Copy)]
-enum SplitSegment {
-    Left,
-    Right,
-    Top,
-    Bottom,
-}
-
-impl SplitSegment {
-    fn suffix(self) -> &'static str {
-        match self {
-            Self::Left => "left",
-            Self::Right => "right",
-            Self::Top => "top",
-            Self::Bottom => "bottom",
-        }
-    }
 }
 
 #[tauri::command]
@@ -188,74 +170,73 @@ fn output_format_extension(output_format: &str) -> String {
     }
 }
 
-fn output_file_name(stem: &str, naming_pattern: &str, output_format: &str, index: u32, segment: SplitSegment) -> String {
+fn output_file_name(stem: &str, naming_pattern: &str, output_format: &str, index: u32) -> String {
     let output_format = output_format_extension(output_format);
     match naming_pattern {
-        "source-name-date" => format!("{}-{}-{:03}-{}.{}", stem, current_date_stamp(), index, segment.suffix(), output_format),
-        _ => format!("{}-{:03}-{}.{}", stem, index, segment.suffix(), output_format),
+        "source-name-date" => format!("{}-{}-{:03}.{}", stem, current_date_stamp(), index, output_format),
+        _ => format!("{}-{:03}.{}", stem, index, output_format),
     }
 }
 
 fn validate_request(request: &SplitImageFileRequest) -> Result<()> {
-    if !(1..=99).contains(&request.ratio) {
-        anyhow::bail!("比例必须在 1 到 99 之间");
+    if !(1..=10).contains(&request.columns) {
+        anyhow::bail!("列数必须在 1 到 10 之间");
+    }
+    if !(1..=10).contains(&request.rows) {
+        anyhow::bail!("行数必须在 1 到 10 之间");
+    }
+    if request.columns == 1 && request.rows == 1 {
+        anyhow::bail!("至少需要分割为 2 个部分");
     }
     if !matches!(normalized_format(&request.output_format).as_str(), "jpg" | "png" | "webp") {
         anyhow::bail!("不支持的输出格式: {}", request.output_format);
     }
-    if !matches!(request.split_direction.as_str(), "vertical" | "horizontal") {
-        anyhow::bail!("不支持的分割方向: {}", request.split_direction);
-    }
     Ok(())
 }
 
-fn split_image(image: &DynamicImage, direction: &str, ratio: u32) -> Result<Vec<(SplitSegment, DynamicImage)>> {
+fn split_grid(image: &DynamicImage, columns: u32, rows: u32) -> Result<Vec<DynamicImage>> {
     let (width, height) = image.dimensions();
-    if direction == "vertical" {
-        let first_width = width.saturating_mul(ratio) / 100;
-        let second_width = width.saturating_sub(first_width);
-        if first_width == 0 || second_width == 0 || height == 0 {
-            anyhow::bail!("图片尺寸过小，无法按当前比例左右切割");
-        }
-        return Ok(vec![
-            (SplitSegment::Left, image.crop_imm(0, 0, first_width, height)),
-            (SplitSegment::Right, image.crop_imm(first_width, 0, second_width, height)),
-        ]);
+    let base_width = width / columns;
+    let base_height = height / rows;
+    if base_width == 0 || base_height == 0 {
+        anyhow::bail!("图片尺寸过小，无法按当前份数分割");
     }
 
-    let first_height = height.saturating_mul(ratio) / 100;
-    let second_height = height.saturating_sub(first_height);
-    if first_height == 0 || second_height == 0 || width == 0 {
-        anyhow::bail!("图片尺寸过小，无法按当前比例上下切割");
+    let mut outputs = Vec::new();
+    for row in 0..rows {
+        let y = row * base_height;
+        let segment_height = if row == rows - 1 { height - y } else { base_height };
+        for column in 0..columns {
+            let x = column * base_width;
+            let segment_width = if column == columns - 1 { width - x } else { base_width };
+            outputs.push(image.crop_imm(x, y, segment_width, segment_height));
+        }
     }
-    Ok(vec![
-        (SplitSegment::Top, image.crop_imm(0, 0, width, first_height)),
-        (SplitSegment::Bottom, image.crop_imm(0, first_height, width, second_height)),
-    ])
+    Ok(outputs)
 }
 
 fn write_split_outputs(
     source_stem: &str,
     output_directory: &Path,
     request: &SplitImageFileRequest,
-    index: u32,
     image: &DynamicImage,
+    next_index: &mut u32,
     output_paths: &mut Vec<String>,
     skipped_count: &mut u32,
 ) -> Result<()> {
-    for (segment, split) in split_image(image, &request.split_direction, request.ratio)? {
+    for split in split_grid(image, request.columns, request.rows)? {
         let output_path = output_directory.join(output_file_name(
             source_stem,
             &request.naming_pattern,
             &request.output_format,
-            index,
-            segment,
+            *next_index,
         ));
+        *next_index += 1;
         if output_path.exists() {
             *skipped_count += 1;
             continue;
         }
-        write_dynamic_image(&output_path, &split, &request.output_format, Some(90))?;
+        write_dynamic_image(&output_path, &split, &request.output_format, Some(request.quality))?;
         output_paths.push(output_path.to_string_lossy().into_owned());
     }
     Ok(())
@@ -272,10 +253,11 @@ fn split_image_file_impl(request: SplitImageFileRequest, resource_dir: Option<Pa
     let mut output_paths = Vec::new();
     let mut skipped_count = 0;
     let source_stem = stem(&source);
+    let mut next_index = 1;
 
     if is_supported_image(&source) {
         let image = image::open(&source).with_context(|| format!("无法打开图片: {}", source.display()))?;
-        write_split_outputs(&source_stem, &output_directory, &request, 1, &image, &mut output_paths, &mut skipped_count)?;
+        write_split_outputs(&source_stem, &output_directory, &request, &image, &mut next_index, &mut output_paths, &mut skipped_count)?;
     } else if extension(&source) == "pdf" {
         let rendered_pages = render_pdf_pages(&source, resource_dir.as_deref(), &[], "standard")?;
         if rendered_pages.is_empty() {
@@ -286,8 +268,8 @@ fn split_image_file_impl(request: SplitImageFileRequest, resource_dir: Option<Pa
                 &source_stem,
                 &output_directory,
                 &request,
-                rendered_page.page_number,
                 &rendered_page.image,
+                &mut next_index,
                 &mut output_paths,
                 &mut skipped_count,
             )?;

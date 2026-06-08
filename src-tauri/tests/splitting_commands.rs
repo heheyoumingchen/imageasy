@@ -69,11 +69,11 @@ fn inspect_splitting_directory_recursively_collects_images_and_pdf() {
 }
 
 #[test]
-fn split_image_file_splits_left_and_right_by_ratio() {
+fn split_image_file_splits_grid_with_remainder_on_last_row_and_column() {
     let dir = tempdir().unwrap();
     let source = dir.path().join("wide.png");
     let out = dir.path().join("out");
-    ImageBuffer::<Rgba<u8>, _>::from_pixel(10, 4, Rgba([100, 120, 140, 255]))
+    ImageBuffer::<Rgba<u8>, _>::from_pixel(10, 7, Rgba([100, 120, 140, 255]))
         .save(&source)
         .unwrap();
 
@@ -82,31 +82,35 @@ fn split_image_file_splits_left_and_right_by_ratio() {
             source_path: source.to_string_lossy().into_owned(),
             output_directory: out.to_string_lossy().into_owned(),
             output_format: "png".into(),
-            split_direction: "vertical".into(),
-            ratio: 30,
+            columns: 3,
+            rows: 2,
+            quality: 88,
             naming_pattern: "source-name-index".into(),
         },
         None,
     )
     .unwrap();
 
-    assert_eq!(result.split_count, 2);
+    assert_eq!(result.split_count, 6);
     assert_eq!(result.skipped_count, 0);
-    assert_eq!(result.output_paths.len(), 2);
-    let left = image::open(PathBuf::from(&result.output_paths[0])).unwrap();
-    let right = image::open(PathBuf::from(&result.output_paths[1])).unwrap();
-    assert_eq!(left.dimensions(), (3, 4));
-    assert_eq!(right.dimensions(), (7, 4));
-    assert!(result.output_paths[0].ends_with("wide-001-left.png"));
-    assert!(result.output_paths[1].ends_with("wide-001-right.png"));
+    assert_eq!(result.output_paths.len(), 6);
+    assert!(result.output_paths[0].ends_with("wide-001.png"));
+    assert!(result.output_paths[5].ends_with("wide-006.png"));
+
+    let first = image::open(PathBuf::from(&result.output_paths[0])).unwrap();
+    let third = image::open(PathBuf::from(&result.output_paths[2])).unwrap();
+    let sixth = image::open(PathBuf::from(&result.output_paths[5])).unwrap();
+    assert_eq!(first.dimensions(), (3, 3));
+    assert_eq!(third.dimensions(), (4, 3));
+    assert_eq!(sixth.dimensions(), (4, 4));
 }
 
 #[test]
-fn split_image_file_splits_top_and_bottom_by_ratio() {
+fn split_image_file_splits_vertical_rows_only() {
     let dir = tempdir().unwrap();
     let source = dir.path().join("tall.png");
     let out = dir.path().join("out");
-    ImageBuffer::<Rgba<u8>, _>::from_pixel(10, 6, Rgba([90, 40, 200, 255]))
+    ImageBuffer::<Rgba<u8>, _>::from_pixel(8, 9, Rgba([90, 40, 200, 255]))
         .save(&source)
         .unwrap();
 
@@ -115,51 +119,70 @@ fn split_image_file_splits_top_and_bottom_by_ratio() {
             source_path: source.to_string_lossy().into_owned(),
             output_directory: out.to_string_lossy().into_owned(),
             output_format: "jpg".into(),
-            split_direction: "horizontal".into(),
-            ratio: 50,
+            columns: 1,
+            rows: 3,
+            quality: 75,
             naming_pattern: "source-name-index".into(),
         },
         None,
     )
     .unwrap();
 
-    let top = image::open(PathBuf::from(&result.output_paths[0])).unwrap();
-    let bottom = image::open(PathBuf::from(&result.output_paths[1])).unwrap();
-    assert_eq!(top.dimensions(), (10, 3));
-    assert_eq!(bottom.dimensions(), (10, 3));
-    assert!(result.output_paths[0].ends_with("tall-001-top.jpg"));
-    assert!(result.output_paths[1].ends_with("tall-001-bottom.jpg"));
+    assert_eq!(result.split_count, 3);
+    let first = image::open(PathBuf::from(&result.output_paths[0])).unwrap();
+    let third = image::open(PathBuf::from(&result.output_paths[2])).unwrap();
+    assert_eq!(first.dimensions(), (8, 3));
+    assert_eq!(third.dimensions(), (8, 3));
+    assert!(result.output_paths[0].ends_with("tall-001.jpg"));
+    assert!(result.output_paths[2].ends_with("tall-003.jpg"));
 }
 
 #[test]
-fn split_image_file_rejects_invalid_ratio_and_tiny_image() {
+fn split_image_file_rejects_invalid_grid_and_tiny_image() {
     let dir = tempdir().unwrap();
     let source = dir.path().join("tiny.png");
     ImageBuffer::<Rgba<u8>, _>::from_pixel(1, 4, Rgba([255, 0, 0, 255]))
         .save(&source)
         .unwrap();
 
-    let bad_ratio = split_image_file_with_resource_dir(
+    let no_split = split_image_file_with_resource_dir(
         SplitImageFileRequest {
             source_path: source.to_string_lossy().into_owned(),
             output_directory: dir.path().join("out").to_string_lossy().into_owned(),
             output_format: "png".into(),
-            split_direction: "vertical".into(),
-            ratio: 100,
+            columns: 1,
+            rows: 1,
+            quality: 90,
             naming_pattern: "source-name-index".into(),
         },
         None,
     )
     .unwrap_err();
-    assert!(bad_ratio.to_string().contains("比例必须在 1 到 99 之间"));
+    assert!(no_split.to_string().contains("至少需要分割为 2 个部分"));
+
+    let bad_columns = split_image_file_with_resource_dir(
+        SplitImageFileRequest {
+            source_path: source.to_string_lossy().into_owned(),
+            output_directory: dir.path().join("out").to_string_lossy().into_owned(),
+            output_format: "png".into(),
+            columns: 11,
+            rows: 1,
+            quality: 90,
+            naming_pattern: "source-name-index".into(),
+        },
+        None,
+    )
+    .unwrap_err();
+    assert!(bad_columns.to_string().contains("列数必须在 1 到 10 之间"));
 
     let tiny = split_image_file_with_resource_dir(
         SplitImageFileRequest {
             source_path: source.to_string_lossy().into_owned(),
             output_directory: dir.path().join("out").to_string_lossy().into_owned(),
             output_format: "png".into(),
-            split_direction: "vertical".into(),
-            ratio: 50,
+            columns: 2,
+            rows: 1,
+            quality: 90,
             naming_pattern: "source-name-index".into(),
         },
         None,
@@ -169,7 +192,7 @@ fn split_image_file_rejects_invalid_ratio_and_tiny_image() {
 }
 
 #[test]
-fn split_image_file_skips_existing_outputs() {
+fn split_image_file_skips_existing_outputs_with_continuous_names() {
     let dir = tempdir().unwrap();
     let source = dir.path().join("wide.png");
     let out = dir.path().join("out");
@@ -177,15 +200,16 @@ fn split_image_file_skips_existing_outputs() {
     ImageBuffer::<Rgba<u8>, _>::from_pixel(10, 4, Rgba([100, 120, 140, 255]))
         .save(&source)
         .unwrap();
-    fs::write(out.join("wide-001-left.png"), b"existing").unwrap();
+    fs::write(out.join("wide-001.png"), b"existing").unwrap();
 
     let result = split_image_file_with_resource_dir(
         SplitImageFileRequest {
             source_path: source.to_string_lossy().into_owned(),
             output_directory: out.to_string_lossy().into_owned(),
             output_format: "png".into(),
-            split_direction: "vertical".into(),
-            ratio: 50,
+            columns: 2,
+            rows: 1,
+            quality: 90,
             naming_pattern: "source-name-index".into(),
         },
         None,
@@ -195,5 +219,5 @@ fn split_image_file_skips_existing_outputs() {
     assert_eq!(result.split_count, 1);
     assert_eq!(result.skipped_count, 1);
     assert_eq!(result.output_paths.len(), 1);
-    assert!(result.output_paths[0].ends_with("wide-001-right.png"));
+    assert!(result.output_paths[0].ends_with("wide-002.png"));
 }
