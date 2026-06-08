@@ -112,6 +112,57 @@ describe('SplitImagePage', () => {
     expect(await screen.findByText('完成 3 张')).toBeInTheDocument();
   });
 
+  it('starts vertical splitting with selected grid settings', async () => {
+    const user = userEvent.setup();
+    vi.mocked(openSplittingSources).mockResolvedValue({ files: ['F:/demo/a.jpg'], directories: [], cancelled: false });
+    vi.mocked(inspectSplittingFile).mockResolvedValue(imageInfo);
+    vi.mocked(splitImageFile).mockResolvedValue({ outputPaths: ['F:/demo/a-001.jpg', 'F:/demo/a-002.jpg', 'F:/demo/a-003.jpg', 'F:/demo/a-004.jpg'], splitCount: 4, skippedCount: 0 });
+
+    render(<SplitImagePage />);
+    await user.click(screen.getByRole('button', { name: '添加文件' }));
+    await screen.findByText('a.jpg');
+    await user.click(screen.getByRole('button', { name: '竖向分割' }));
+    fireEvent.change(screen.getByRole('slider', { name: /竖向分割份数/ }), { target: { value: '4' } });
+    await user.click(screen.getByRole('button', { name: '分割图片' }));
+
+    await waitFor(() => expect(splitImageFile).toHaveBeenCalledWith({
+      sourcePath: 'F:/demo/a.jpg',
+      outputDirectory: 'F:/demo',
+      outputFormat: 'png',
+      columns: 1,
+      rows: 4,
+      quality: 100,
+      namingPattern: 'source-name-index'
+    }));
+    expect(await screen.findByText('完成 4 张')).toBeInTheDocument();
+  });
+
+  it('starts grid splitting with selected grid settings', async () => {
+    const user = userEvent.setup();
+    vi.mocked(openSplittingSources).mockResolvedValue({ files: ['F:/demo/a.jpg'], directories: [], cancelled: false });
+    vi.mocked(inspectSplittingFile).mockResolvedValue(imageInfo);
+    vi.mocked(splitImageFile).mockResolvedValue({ outputPaths: ['F:/demo/a-001.jpg', 'F:/demo/a-002.jpg', 'F:/demo/a-003.jpg', 'F:/demo/a-004.jpg', 'F:/demo/a-005.jpg', 'F:/demo/a-006.jpg'], splitCount: 6, skippedCount: 0 });
+
+    render(<SplitImagePage />);
+    await user.click(screen.getByRole('button', { name: '添加文件' }));
+    await screen.findByText('a.jpg');
+    await user.click(screen.getByRole('button', { name: '网格分割' }));
+    fireEvent.change(screen.getByRole('slider', { name: /横向分割份数/ }), { target: { value: '3' } });
+    fireEvent.change(screen.getByRole('slider', { name: /竖向分割份数/ }), { target: { value: '2' } });
+    await user.click(screen.getByRole('button', { name: '分割图片' }));
+
+    await waitFor(() => expect(splitImageFile).toHaveBeenCalledWith({
+      sourcePath: 'F:/demo/a.jpg',
+      outputDirectory: 'F:/demo',
+      outputFormat: 'png',
+      columns: 3,
+      rows: 2,
+      quality: 100,
+      namingPattern: 'source-name-index'
+    }));
+    expect(await screen.findByText('完成 6 张')).toBeInTheDocument();
+  });
+
   it('shows failed details and retries failed items', async () => {
     const user = userEvent.setup();
     vi.mocked(openSplittingSources).mockResolvedValue({ files: ['F:/demo/a.jpg'], directories: [], cancelled: false });
