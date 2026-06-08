@@ -14,7 +14,7 @@ const SplitImagePage = () => {
   const copy = useMemo(() => language === 'en-US' ? {
     pageTitle: 'Image Splitting',
     fileList: 'File Name', add: 'Import files', clear: 'Clear list', split: 'Split Image', splitting: 'Splitting...', empty: 'Supports images and PDF files. Drag a folder here to open it.', pageUnit: 'pages', statusReady: 'Ready', statusRunning: 'Splitting', statusFailed: 'Failed', statusDone: (count: number) => `Done ${count}`,
-    settings: { mode: 'Mode', modeHorizontal: 'Horizontal', modeVertical: 'Vertical', modeGrid: 'Grid', splitParameters: 'Split Parameters', horizontalSplits: 'Horizontal splits', verticalSplits: 'Vertical splits', previewParts: (count: number) => `This will create ${count} parts`, outputSettings: 'Output Settings', outputFormat: 'Format', quality: 'Quality' },
+    settings: { mode: 'Mode', modeHorizontal: 'Horizontal', modeVertical: 'Vertical', modeGrid: 'Grid', splitParameters: 'Split Parameters', horizontalSplits: 'Horizontal splits', verticalSplits: 'Vertical splits', previewParts: (count: number) => `This will create ${count} parts` },
     errors: { outputDirectoryRequired: 'Please choose an output directory first' },
     actions: { openOutputDirectory: 'Open output directory', retryFailedItems: 'Retry failed items', toggleFailedDetails: 'Error details', emptyFailedItems: 'No failed items.' },
     batchStatus: { totalLabel: 'Total', successLabel: 'Success', failedLabel: 'Failed', runningLabel: 'Running', progressTitle: 'Overall progress' },
@@ -22,7 +22,7 @@ const SplitImagePage = () => {
   } : {
     pageTitle: '图片分割',
     fileList: '文件列表', add: '添加文件', clear: '清空列表', split: '分割图片', splitting: '正在分割...', empty: '支持图片和 PDF 文件，拖拽文件夹即可打开。', pageUnit: '页', statusReady: '待处理', statusRunning: '分割中', statusFailed: '失败', statusDone: (count: number) => `完成 ${count} 张`,
-    settings: { mode: '模式', modeHorizontal: '横向分割', modeVertical: '竖向分割', modeGrid: '网格分割', splitParameters: '分割参数', horizontalSplits: '横向分割份数', verticalSplits: '竖向分割份数', previewParts: (count: number) => `这将创建 ${count} 个部分`, outputSettings: '输出设置', outputFormat: '导出格式', quality: '图片质量' },
+    settings: { mode: '模式', modeHorizontal: '横向分割', modeVertical: '竖向分割', modeGrid: '网格分割', splitParameters: '分割参数', horizontalSplits: '横向分割份数', verticalSplits: '竖向分割份数', previewParts: (count: number) => `这将创建 ${count} 个部分` },
     errors: { outputDirectoryRequired: '请先选择输出目录' },
     actions: { openOutputDirectory: '打开输出目录', retryFailedItems: '重试失败项', toggleFailedDetails: '错误详情', emptyFailedItems: '当前没有失败项。' },
     batchStatus: { totalLabel: '总数', successLabel: '成功', failedLabel: '失败', runningLabel: '进行中', progressTitle: '全局进度' },
@@ -80,14 +80,10 @@ const SplitImagePage = () => {
               mode={workflow.mode}
               horizontalSplits={workflow.horizontalSplits}
               verticalSplits={workflow.verticalSplits}
-              outputFormat={workflow.outputFormat}
-              quality={workflow.quality}
               disabled={workflow.isRunning}
               onModeChange={workflow.updateMode}
               onHorizontalSplitsChange={workflow.updateHorizontalSplits}
               onVerticalSplitsChange={workflow.updateVerticalSplits}
-              onOutputFormatChange={workflow.updateOutputFormat}
-              onQualityChange={workflow.updateQuality}
             />
           </div>
 

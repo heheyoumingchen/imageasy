@@ -1,4 +1,4 @@
-import type { ConversionColorMode, ConversionOutputSettings } from '../types/conversion';
+import type { ConversionColorMode, ConversionOutputFormat, PageRangeMode } from '../types/conversion';
 
 const colorModeLabelMap: Record<ConversionColorMode, string> = {
   rgb: 'RGB',
@@ -6,7 +6,12 @@ const colorModeLabelMap: Record<ConversionColorMode, string> = {
   'gray-cmyk': '灰度 CMYK'
 };
 
-type SummarySettings = Pick<ConversionOutputSettings, 'outputFormat' | 'colorMode' | 'pageRangeMode' | 'pageRangeText'>;
+type SummarySettings = {
+  outputFormat: ConversionOutputFormat;
+  colorMode: ConversionColorMode;
+  pageRangeMode: PageRangeMode;
+  pageRangeText: string;
+};
 
 export const buildConversionSummary = (settings: Partial<SummarySettings> & Pick<SummarySettings, 'outputFormat' | 'colorMode'>) => {
   const parts = [settings.outputFormat.toUpperCase(), colorModeLabelMap[settings.colorMode]];

@@ -4,12 +4,86 @@ use std::{fs, path::{Path, PathBuf}};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
+pub struct ConversionTaskSettings {
+    pub naming_pattern: String,
+    pub output_format: String,
+    pub color_mode: String,
+    pub quality: u8,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ExtractionTaskSettings {
+    pub naming_pattern: String,
+    pub output_format: String,
+    pub color_mode: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct SplittingTaskSettings {
+    pub naming_pattern: String,
+    pub output_format: String,
+    pub quality: u8,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct StitchingTaskSettings {
+    pub naming_pattern: String,
+    pub output_format: String,
+    pub quality: u8,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
 pub struct PersistedSettings {
     pub theme: String,
     pub language: String,
     pub max_concurrency: u8,
     pub output_directory_strategy: String,
     pub remember_last_params: bool,
+    #[serde(default = "default_conversion_task")]
+    pub conversion: ConversionTaskSettings,
+    #[serde(default = "default_extraction_task")]
+    pub extraction: ExtractionTaskSettings,
+    #[serde(default = "default_splitting_task")]
+    pub splitting: SplittingTaskSettings,
+    #[serde(default = "default_stitching_task")]
+    pub stitching: StitchingTaskSettings,
+}
+
+fn default_conversion_task() -> ConversionTaskSettings {
+    ConversionTaskSettings {
+        naming_pattern: "source-name-index".into(),
+        output_format: "jpg".into(),
+        color_mode: "rgb".into(),
+        quality: 100,
+    }
+}
+
+fn default_extraction_task() -> ExtractionTaskSettings {
+    ExtractionTaskSettings {
+        naming_pattern: "source-name-index".into(),
+        output_format: "jpg".into(),
+        color_mode: "rgb".into(),
+    }
+}
+
+fn default_splitting_task() -> SplittingTaskSettings {
+    SplittingTaskSettings {
+        naming_pattern: "source-name-index".into(),
+        output_format: "png".into(),
+        quality: 100,
+    }
+}
+
+fn default_stitching_task() -> StitchingTaskSettings {
+    StitchingTaskSettings {
+        naming_pattern: "source-name-index".into(),
+        output_format: "jpg".into(),
+        quality: 100,
+    }
 }
 
 fn default_settings() -> PersistedSettings {
@@ -19,6 +93,10 @@ fn default_settings() -> PersistedSettings {
         max_concurrency: 2,
         output_directory_strategy: "same-as-source".into(),
         remember_last_params: false,
+        conversion: default_conversion_task(),
+        extraction: default_extraction_task(),
+        splitting: default_splitting_task(),
+        stitching: default_stitching_task(),
     }
 }
 

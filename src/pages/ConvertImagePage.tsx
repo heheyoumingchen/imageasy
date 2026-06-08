@@ -25,7 +25,6 @@ const ConvertImagePage = () => {
     updateGlobalSettings,
     buildItemSummary,
     importFiles,
-    chooseDirectory,
     retryFailedItems,
     clearList,
     openOutputDirectory,
@@ -46,20 +45,10 @@ const ConvertImagePage = () => {
             settings: {
               panelLabel: 'Conversion settings',
               panelTitle: 'Conversion settings',
-              outputDirectory: 'Output directory',
-              chooseOutputDirectory: 'Choose path',
-              outputFormat: 'Output format',
-              colorMode: 'Color mode',
-              namingPattern: 'Naming pattern',
-              outputQuality: 'Output quality',
-              dpi: 'DPI',
               pageRange: 'Page range',
               allPages: 'All pages',
               customPages: 'Page range',
-              customPageRangeLabel: 'Page range',
-              grayCmyk: 'Gray CMYK',
-              sourceNameIndex: 'Source name - index',
-              sourceNameDate: 'Source name - date'
+              customPageRangeLabel: 'Page range'
             },
             actions: {
               openOutputDirectory: 'Open output directory',
@@ -97,20 +86,10 @@ const ConvertImagePage = () => {
             settings: {
               panelLabel: '转换设置区',
               panelTitle: '转换设置',
-              outputDirectory: '输出目录',
-              chooseOutputDirectory: '选择路径',
-              outputFormat: '输出格式',
-              colorMode: '输出色彩模式',
-              namingPattern: '命名规则',
-              outputQuality: '输出质量',
-              dpi: 'DPI',
               pageRange: '页范围',
               allPages: '全选页',
               customPages: '页码范围',
-              customPageRangeLabel: '页码范围',
-              grayCmyk: '灰度 CMYK',
-              sourceNameIndex: '原文件名-序号',
-              sourceNameDate: '原文件名-日期-序号'
+              customPageRangeLabel: '页码范围'
             },
             actions: {
               openOutputDirectory: '打开输出目录',
@@ -188,7 +167,6 @@ const ConvertImagePage = () => {
             settings={globalSettings}
             disabled={isRunning}
             onChange={updateGlobalSettings}
-            onChooseOutputDirectory={chooseDirectory}
           />
 
           <button

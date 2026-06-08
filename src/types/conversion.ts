@@ -16,14 +16,10 @@ export type ConversionDocumentMetadata = {
 };
 
 export type ConversionOutputSettings = {
-  outputFormat: ConversionOutputFormat;
-  colorMode: ConversionColorMode;
-  quality: number;
   pageRangeMode: PageRangeMode;
   pageRangeText: string;
   renderDensity: 'standard' | 'high';
   outputDirectory: string;
-  namingPattern: 'source-name-index' | 'source-name-date';
 };
 
 export type ConversionItem = {

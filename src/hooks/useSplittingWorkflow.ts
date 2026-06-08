@@ -6,7 +6,7 @@ import { inspectSplittingDirectory, inspectSplittingFile, splitImageFile } from 
 import { runConcurrentQueue } from '../utils/batchQueue';
 import { toErrorMessage } from '../utils/errors';
 import { sourceDirectory } from '../utils/paths';
-import type { InspectSplittingFileResult, SplittingItem, SplittingMode, SplittingNamingPattern, SplittingOutputFormat } from '../types/splitting';
+import type { InspectSplittingFileResult, SplittingItem, SplittingMode } from '../types/splitting';
 
 const gridForMode = (mode: SplittingMode, horizontalSplits: number, verticalSplits: number) => {
   if (mode === 'horizontal') {
@@ -38,12 +38,9 @@ export const useSplittingWorkflow = () => {
   const [items, setItems] = useState<SplittingItem[]>([]);
   const [outputDirectory, setOutputDirectory] = useState('');
   const [outputDirectoryManual, setOutputDirectoryManual] = useState(false);
-  const [outputFormat, setOutputFormat] = useState<SplittingOutputFormat>('png');
   const [mode, setMode] = useState<SplittingMode>('grid');
   const [horizontalSplits, setHorizontalSplits] = useState(2);
   const [verticalSplits, setVerticalSplits] = useState(2);
-  const [quality, setQuality] = useState(100);
-  const [namingPattern, setNamingPattern] = useState<SplittingNamingPattern>('source-name-index');
   const [pageError, setPageError] = useState<string | null>(null);
   const [isRunning, setIsRunning] = useState(false);
   const [failedDetailsOpen, setFailedDetailsOpen] = useState(false);
@@ -90,12 +87,9 @@ export const useSplittingWorkflow = () => {
 
   const resetCompletedItems = () => setItems((current) => current.map(resetProcessedItem));
 
-  const updateOutputFormat = (value: SplittingOutputFormat) => { setOutputFormat(value); resetCompletedItems(); };
   const updateMode = (value: SplittingMode) => { setMode(value); resetCompletedItems(); };
   const updateHorizontalSplits = (value: number) => { setHorizontalSplits(value); resetCompletedItems(); };
   const updateVerticalSplits = (value: number) => { setVerticalSplits(value); resetCompletedItems(); };
-  const updateQuality = (value: number) => { setQuality(value); resetCompletedItems(); };
-  const updateNamingPattern = (value: SplittingNamingPattern) => { setNamingPattern(value); resetCompletedItems(); };
 
   const toggleItemSelected = (sourcePath: string) => {
     setItems((current) => current.map((item) => item.sourcePath === sourcePath ? { ...item, selected: !item.selected } : item));
@@ -116,18 +110,19 @@ export const useSplittingWorkflow = () => {
     if (outputDirectory) await openDirectoryInSystem(outputDirectory);
   };
 
-  const runItem = async (item: SplittingItem) => {
+  const runItem = async (item: SplittingItem, targetDirectory: string) => {
     setItems((current) => markItem(current, item.sourcePath, { status: 'running', errorMessage: null, outputPaths: [], splitCount: 0 }));
     try {
       const { columns, rows } = gridForMode(mode, horizontalSplits, verticalSplits);
+      const splitting = getSettingsStore().getState().splitting;
       const result = await splitImageFile({
         sourcePath: item.sourcePath,
-        outputDirectory,
-        outputFormat,
+        outputDirectory: targetDirectory,
+        outputFormat: splitting.outputFormat,
         columns,
         rows,
-        quality,
-        namingPattern
+        quality: splitting.quality,
+        namingPattern: splitting.namingPattern
       });
       setItems((current) => markItem(current, item.sourcePath, { status: 'success', outputPaths: result.outputPaths, splitCount: result.splitCount, errorMessage: null }));
     } catch (error) {
@@ -137,23 +132,33 @@ export const useSplittingWorkflow = () => {
 
   const startSplitting = async (copyErrors: { outputDirectoryRequired: string }) => {
     if (isRunning) return;
-    if (!outputDirectory) { setPageError(copyErrors.outputDirectoryRequired); return; }
+    let targetDirectory = outputDirectory;
+    if (!targetDirectory) {
+      if (getSettingsStore().getState().outputDirectoryStrategy === 'custom') {
+        const selected = await chooseOutputDirectory();
+        if (!selected) { setPageError(copyErrors.outputDirectoryRequired); return; }
+        targetDirectory = selected;
+        setOutputDirectory(selected);
+        setOutputDirectoryManual(true);
+      } else {
+        setPageError(copyErrors.outputDirectoryRequired);
+        return;
+      }
+    }
     const readyItems = items.filter((item) => item.status === 'ready' && item.selected);
     if (readyItems.length === 0) return;
     setPageError(null);
     setIsRunning(true);
-    await runConcurrentQueue(readyItems, getSettingsStore().getState().maxConcurrency, runItem);
+    await runConcurrentQueue(readyItems, getSettingsStore().getState().maxConcurrency, (item) => runItem(item, targetDirectory));
     setIsRunning(false);
   };
 
   return {
-    items, outputDirectory, outputFormat, mode, horizontalSplits, verticalSplits, quality,
-    namingPattern,
+    items, outputDirectory, mode, horizontalSplits, verticalSplits,
     pageError, isRunning, failedDetailsOpen, setFailedDetailsOpen, stats, failedItems,
     canStart: items.some((item) => item.status === 'ready' && item.selected) && Boolean(outputDirectory),
     importFiles, selectOutputDirectory, openOutputDirectory,
-    updateOutputFormat, updateMode, updateHorizontalSplits, updateVerticalSplits, updateQuality,
-    updateNamingPattern,
+    updateMode, updateHorizontalSplits, updateVerticalSplits,
     retryFailed, toggleItemSelected, clearList, startSplitting,
   };
 };

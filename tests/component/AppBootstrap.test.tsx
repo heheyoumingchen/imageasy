@@ -140,7 +140,6 @@ describe('App bootstrap', () => {
       expect(screen.queryByRole('heading', { name: 'Extraction' })).not.toBeInTheDocument();
       expect(screen.queryByText('Extract image assets from Word or PDF documents in batch.')).not.toBeInTheDocument();
       expect(screen.getByRole('button', { name: 'Import documents' })).toBeInTheDocument();
-      expect(screen.getByText('Extraction settings')).toBeInTheDocument();
       expect(screen.getByRole('button', { name: 'Start extraction' })).toBeDisabled();
     });
   });

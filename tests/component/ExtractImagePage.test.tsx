@@ -40,7 +40,11 @@ describe('ExtractImagePage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.mocked(openExtractionSources).mockResolvedValue({ files: [], directories: [], cancelled: false });
-    getSettingsStore().setState({ language: 'zh-CN' });
+    getSettingsStore().setState({
+      language: 'zh-CN',
+      outputDirectoryStrategy: 'same-as-source',
+      extraction: { namingPattern: 'source-name-index', outputFormat: 'jpg', colorMode: 'rgb' }
+    });
     vi.mocked(inspectExtractionDocument).mockResolvedValue({
       sourcePath: 'F:/Demo/产品手册.docx',
       sourceName: '产品手册.docx',
@@ -59,7 +63,7 @@ describe('ExtractImagePage', () => {
     render(<ExtractImagePage />);
 
     expect(screen.getByText('文件列表')).toBeInTheDocument();
-    expect(screen.getByText('提取设置')).toBeInTheDocument();
+    expect(screen.queryByText('提取设置')).not.toBeInTheDocument();
     expect(screen.getByText('全局进度')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '添加文件' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '清空列表' })).toBeInTheDocument();
@@ -77,32 +81,25 @@ describe('ExtractImagePage', () => {
   it('renders revised extraction output settings', () => {
     const { container } = render(<ExtractImagePage />);
 
-    const outputDirectoryInput = screen.getByLabelText('输出目录');
-    const choosePathButton = screen.getByRole('button', { name: '选择路径' });
     const importButton = screen.getByRole('button', { name: '添加文件' });
 
     expect(
       Array.from(container.querySelectorAll('div')).some((element) => element.className.includes('xl:grid-cols-[1fr_380px]'))
     ).toBe(true);
     expect(importButton.className).not.toContain('shadow');
-    expect(screen.getByLabelText('导出格式')).toBeInTheDocument();
-    expect((screen.getByLabelText('导出格式') as HTMLSelectElement).value).toBe('jpg');
-    expect(screen.getByLabelText('输出色彩模式')).toBeInTheDocument();
-    expect(screen.getByLabelText('命名规则')).toBeInTheDocument();
-    expect(outputDirectoryInput).toBeInTheDocument();
-    expect(outputDirectoryInput.className).toContain('flex-1');
-    expect(choosePathButton.className).toContain('shrink-0');
+    expect(screen.queryByLabelText('导出格式')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('输出色彩模式')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('命名规则')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('输出目录')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '选择路径' })).not.toBeInTheDocument();
     const startButton = screen.getByRole('button', { name: '开始提取' });
     expect(startButton.className).not.toContain('shadow');
-    expect(choosePathButton.className).toContain('h-10');
     expect(importButton.className).toContain('h-10');
     expect(startButton.className).toContain('h-10');
     expect(startButton.className).not.toContain('h-14');
     expect(screen.getByRole('button', { name: '打开输出目录' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '错误详情' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '重试失败项' })).toBeInTheDocument();
-    expect(screen.getByRole('option', { name: '原文件名-序号' })).toBeInTheDocument();
-    expect(screen.getByRole('option', { name: '原文件名-日期-序号' })).toBeInTheDocument();
 
     const emptyState = screen.getByText('支持word、pdf、ppt文件，拖拽文件夹即可打开。').closest('div');
     expect(emptyState?.className).toContain('justify-center');
@@ -188,7 +185,10 @@ describe('ExtractImagePage', () => {
     expect(await screen.findByText('产品手册.docx')).toBeInTheDocument();
     expect(screen.getByText('价格表.pdf')).toBeInTheDocument();
     expect(screen.getAllByRole('checkbox', { checked: true })).toHaveLength(2);
-    expect(screen.getByDisplayValue('F:/Demo/docs')).toBeInTheDocument();
+    const footer = screen.getByRole('contentinfo', { name: '提取任务页状态栏' });
+    expect(
+      within(footer).getByText((_, element) => element?.tagName === 'SPAN' && element.textContent === '输出目录: F:/Demo/docs')
+    ).toBeInTheDocument();
   });
 
   it('imports dropped folders through the empty extraction area', async () => {
@@ -206,7 +206,10 @@ describe('ExtractImagePage', () => {
     dragDropHandler({ payload: { type: 'drop', paths: ['F:/drop'] } });
 
     expect(await screen.findByText('a.pdf')).toBeInTheDocument();
-    expect(screen.getByDisplayValue('F:/drop')).toBeInTheDocument();
+    const footer = screen.getByRole('contentinfo', { name: '提取任务页状态栏' });
+    expect(
+      within(footer).getByText((_, element) => element?.tagName === 'SPAN' && element.textContent === '输出目录: F:/drop')
+    ).toBeInTheDocument();
   });
 
   it('skips unsupported extraction files during add-file import', async () => {
@@ -239,10 +242,12 @@ describe('ExtractImagePage', () => {
     expect(inspectExtractionDocument).not.toHaveBeenCalledWith('F:/Demo/notes.txt');
   });
 
-  it('imports documents and extracts images with selected output settings', async () => {
+  it('extracts images using the global extraction settings and inferred output directory', async () => {
     const user = userEvent.setup();
     vi.mocked(openExtractionDocuments).mockResolvedValue(['F:/Demo/产品手册.docx']);
-    vi.mocked(chooseOutputDirectory).mockResolvedValue('F:/Demo/out');
+    getSettingsStore().setState({
+      extraction: { outputFormat: 'jpg', colorMode: 'gray-cmyk', namingPattern: 'source-name-date' }
+    });
 
     render(<ExtractImagePage />);
 
@@ -260,16 +265,12 @@ describe('ExtractImagePage', () => {
     ).toBeInTheDocument();
     expect(screen.getByLabelText('文件类型 DOCX')).toBeInTheDocument();
 
-    await user.click(screen.getByRole('button', { name: '选择路径' }));
-    await user.selectOptions(screen.getByLabelText('导出格式'), 'jpg');
-    await user.selectOptions(screen.getByLabelText('输出色彩模式'), 'gray-cmyk');
-    await user.selectOptions(screen.getByLabelText('命名规则'), 'source-name-date');
     await user.click(screen.getByRole('button', { name: '开始提取' }));
 
     await waitFor(() => {
       expect(extractDocumentImages).toHaveBeenCalledWith({
         sourcePath: 'F:/Demo/产品手册.docx',
-        outputDirectory: 'F:/Demo/out',
+        outputDirectory: 'F:/Demo',
         outputFormat: 'jpg',
         colorMode: 'gray-cmyk',
         namingPattern: 'source-name-date'
@@ -279,17 +280,17 @@ describe('ExtractImagePage', () => {
     expect((await screen.findAllByText('完成 2 张')).length).toBeGreaterThan(0);
   });
 
-  it('opens the extraction output directory after users choose it', async () => {
+  it('opens the extraction output directory inferred from imported sources', async () => {
     const user = userEvent.setup();
-    vi.mocked(chooseOutputDirectory).mockResolvedValue('F:/Demo/out');
+    vi.mocked(openExtractionDocuments).mockResolvedValue(['F:/Demo/产品手册.docx']);
     vi.mocked(openDirectoryInSystem).mockResolvedValue(undefined);
 
     render(<ExtractImagePage />);
 
-    await user.click(screen.getByRole('button', { name: '选择路径' }));
+    await user.click(screen.getByRole('button', { name: '添加文件' }));
     await user.click(await screen.findByRole('button', { name: '打开输出目录' }));
 
-    expect(openDirectoryInSystem).toHaveBeenCalledWith('F:/Demo/out');
+    expect(openDirectoryInSystem).toHaveBeenCalledWith('F:/Demo');
   });
 
   it('skips unchecked extraction documents when starting', async () => {
@@ -324,7 +325,6 @@ describe('ExtractImagePage', () => {
     render(<ExtractImagePage />);
 
     await user.click(screen.getByRole('button', { name: '添加文件' }));
-    await user.click(screen.getByRole('button', { name: '选择路径' }));
     await user.click(screen.getByRole('button', { name: '开始提取' }));
 
     const failedDetailsButton = screen.getByRole('button', { name: '错误详情' });

@@ -1,7 +1,7 @@
 import Slider from './Slider';
 import ColorPalette from './ColorPalette';
 import ButtonGroup from './ButtonGroup';
-import type { StitchingNamingPattern, StitchingOutputFormat, StitchingResolution } from '../../types/stitching';
+import type { StitchingResolution } from '../../types/stitching';
 import type { CanvasRatio } from '../../types/stitchingLayout';
 
 type Copy = {
@@ -17,13 +17,6 @@ type Copy = {
   resolutionStandard: string;
   resolutionHigh: string;
   resolutionUltra: string;
-  quality: string;
-  outputFormat: string;
-  outputDirectory: string;
-  chooseDirectory: string;
-  namingPattern: string;
-  namingPatternIndexed: string;
-  namingPatternDate: string;
 };
 
 type Props = {
@@ -34,10 +27,6 @@ type Props = {
   borderRadius: number;
   backgroundColor: string;
   resolution: StitchingResolution;
-  quality: number;
-  outputFormat: StitchingOutputFormat;
-  outputDirectory: string;
-  namingPattern: StitchingNamingPattern;
   disabled: boolean;
   onCanvasRatioChange: (value: CanvasRatio) => void;
   onPaddingChange: (value: number) => void;
@@ -45,13 +34,7 @@ type Props = {
   onBorderRadiusChange: (value: number) => void;
   onBackgroundColorChange: (value: string) => void;
   onResolutionChange: (value: StitchingResolution) => void;
-  onQualityChange: (value: number) => void;
-  onOutputFormatChange: (value: StitchingOutputFormat) => void;
-  onOutputDirectoryChange: () => void;
-  onNamingPatternChange: (value: StitchingNamingPattern) => void;
 };
-
-const fieldClass = 'mt-2 h-10 w-full rounded-lg border border-border-light bg-[#FAFBFD] px-4 text-sm font-bold text-[#1A1D23] outline-none transition-all focus:border-meitu focus:ring-4 focus:ring-meitu/10 appearance-none cursor-pointer disabled:cursor-not-allowed disabled:opacity-50';
 
 const sectionTitleClass = 'text-sm font-bold text-[#1A1D23] mb-4';
 
@@ -63,21 +46,13 @@ const StitchingSettingsPanel = ({
   borderRadius,
   backgroundColor,
   resolution,
-  quality,
-  outputFormat,
-  outputDirectory,
-  namingPattern,
   disabled,
   onCanvasRatioChange,
   onPaddingChange,
   onSpacingChange,
   onBorderRadiusChange,
   onBackgroundColorChange,
-  onResolutionChange,
-  onQualityChange,
-  onOutputFormatChange,
-  onOutputDirectoryChange,
-  onNamingPatternChange
+  onResolutionChange
 }: Props) => (
   <div className="space-y-6">
     {/* 画幅比例 - 无标题 */}
@@ -151,66 +126,6 @@ const StitchingSettingsPanel = ({
           disabled={disabled}
           onChange={onResolutionChange}
         />
-
-        <Slider
-          label={copy.quality}
-          value={quality}
-          min={0}
-          max={100}
-          unit="%"
-          disabled={disabled}
-          onChange={onQualityChange}
-        />
-
-        <label className="block">
-          <span className="text-[13px] font-bold text-[#5D6472] uppercase tracking-wider opacity-60">{copy.outputFormat}</span>
-          <select
-            aria-label={copy.outputFormat}
-            className={fieldClass}
-            value={outputFormat}
-            disabled={disabled}
-            onChange={(event) => onOutputFormatChange(event.target.value as StitchingOutputFormat)}
-          >
-            <option value="jpg">JPG</option>
-            <option value="png">PNG</option>
-            <option value="webp">WebP</option>
-          </select>
-        </label>
-
-        <label className="block">
-          <span className="text-[13px] font-bold text-[#5D6472] uppercase tracking-wider opacity-60">{copy.outputDirectory}</span>
-          <div className="relative mt-3 flex items-center gap-3 min-w-0">
-            <input
-              aria-label={copy.outputDirectory}
-              className="min-w-0 flex-1 h-10 rounded-lg border border-border-light bg-[#FAFBFD] px-4 text-sm font-bold text-[#1A1D23] truncate outline-none opacity-80 disabled:opacity-50"
-              value={outputDirectory}
-              readOnly
-              disabled={disabled}
-            />
-            <button
-              type="button"
-              className="h-10 shrink-0 rounded-lg border-2 border-meitu bg-white px-4 text-sm font-bold text-meitu hover:bg-meitu-light transition-all active:scale-95 whitespace-nowrap disabled:cursor-not-allowed disabled:border-border-light disabled:bg-[#FAFBFD] disabled:text-[#B5BBC7]"
-              onClick={onOutputDirectoryChange}
-              disabled={disabled}
-            >
-              {copy.chooseDirectory}
-            </button>
-          </div>
-        </label>
-
-        <label className="block">
-          <span className="text-[13px] font-bold text-[#5D6472] uppercase tracking-wider opacity-60">{copy.namingPattern}</span>
-          <select
-            aria-label={copy.namingPattern}
-            className={fieldClass}
-            value={namingPattern}
-            disabled={disabled}
-            onChange={(event) => onNamingPatternChange(event.target.value as StitchingNamingPattern)}
-          >
-            <option value="source-name-index">{copy.namingPatternIndexed}</option>
-            <option value="source-name-date">{copy.namingPatternDate}</option>
-          </select>
-        </label>
       </div>
     </section>
   </div>

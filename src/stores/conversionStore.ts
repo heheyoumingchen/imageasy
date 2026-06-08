@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { buildConversionSummary } from '../utils/conversionFormats';
 import { expandPageRange } from '../utils/pageRange';
+import { getSettingsStore } from '../hooks/useSettingsStore';
 import type { ConversionItem, ConversionOutputSettings, ConversionStatus } from '../types/conversion';
 
 type ConversionStats = {
@@ -31,14 +32,10 @@ type ConversionStore = {
 };
 
 const defaultGlobalSettings: ConversionOutputSettings = {
-  outputFormat: 'jpg',
-  colorMode: 'rgb',
-  quality: 100,
   pageRangeMode: 'all',
   pageRangeText: '',
   renderDensity: 'standard',
-  outputDirectory: '',
-  namingPattern: 'source-name-index'
+  outputDirectory: ''
 };
 
 const buildStats = (items: ConversionItem[]): ConversionStats => ({
@@ -53,19 +50,23 @@ const buildStats = (items: ConversionItem[]): ConversionStats => ({
 const setItemStatus = (items: ConversionItem[], id: string, status: ConversionStatus, extra: Partial<ConversionItem> = {}) =>
   items.map((item): ConversionItem => (item.id === id ? { ...item, ...extra, status } : item));
 
-const buildImageSummary = (settings: ConversionOutputSettings) =>
-  buildConversionSummary({
-    outputFormat: settings.outputFormat,
-    colorMode: settings.colorMode
+const buildImageSummary = () => {
+  const conversion = getSettingsStore().getState().conversion;
+  return buildConversionSummary({
+    outputFormat: conversion.outputFormat,
+    colorMode: conversion.colorMode
   });
+};
 
-const buildDocumentSummary = (settings: ConversionOutputSettings, item: ConversionItem) =>
-  buildConversionSummary({
-    outputFormat: settings.outputFormat,
-    colorMode: settings.colorMode,
+const buildDocumentSummary = (settings: ConversionOutputSettings, item: ConversionItem) => {
+  const conversion = getSettingsStore().getState().conversion;
+  return buildConversionSummary({
+    outputFormat: conversion.outputFormat,
+    colorMode: conversion.colorMode,
     pageRangeMode: item.outputSettingsOverride.pageRangeMode ?? settings.pageRangeMode,
     pageRangeText: item.outputSettingsOverride.pageRangeText ?? settings.pageRangeText
   });
+};
 
 export const useConversionStore = create<ConversionStore>((set, get) => ({
   items: [],
@@ -134,7 +135,7 @@ export const useConversionStore = create<ConversionStore>((set, get) => ({
       return '';
     }
 
-    return item.kind === 'document' ? buildDocumentSummary(get().globalSettings, item) : buildImageSummary(get().globalSettings);
+    return item.kind === 'document' ? buildDocumentSummary(get().globalSettings, item) : buildImageSummary();
   },
   markItemRunning: (id) =>
     set((state) => {

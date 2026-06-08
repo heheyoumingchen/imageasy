@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
-import { AboutCard, CacheCard, GeneralSettingsCard } from '../components/settings';
+import { AboutCard, CacheCard, GeneralSettingsCard, TaskSettingsCard } from '../components/settings';
+import type { TaskOutputFormat, TaskSettingsCardCopy, TaskSettingsValue } from '../components/settings';
 import ConfirmDialog from '../components/feedback/ConfirmDialog';
 import { getSettingsStore } from '../hooks/useSettingsStore';
 import { clearAppCache, getAppCacheUsage } from '../services/cacheCommands';
@@ -60,7 +61,11 @@ const SettingsPage = () => {
     language: state.language,
     maxConcurrency: state.maxConcurrency,
     outputDirectoryStrategy: state.outputDirectoryStrategy,
-    rememberLastParams: state.rememberLastParams
+    rememberLastParams: state.rememberLastParams,
+    conversion: state.conversion,
+    extraction: state.extraction,
+    splitting: state.splitting,
+    stitching: state.stitching
   });
   const isDirty = hasSettingsDraftChanged(draft, savedSnapshot);
   const isEnglish = formState.language === 'en-US';
@@ -91,6 +96,17 @@ const SettingsPage = () => {
         checkForUpdates: 'Check for Updates',
         contact: 'Contact',
         close: 'Close',
+        conversionTask: 'Image Conversion',
+        extractionTask: 'Image Extraction',
+        splittingTask: 'Image Splitting',
+        stitchingTask: 'Image Stitching',
+        namingPattern: 'Naming pattern',
+        sourceNameIndex: 'Source name - index',
+        sourceNameDate: 'Source name - date',
+        outputFormat: 'Output format',
+        colorMode: 'Color mode',
+        grayCmyk: 'Gray CMYK',
+        outputQuality: 'Output quality',
       }
     : {
         reset: '恢复默认设置',
@@ -117,6 +133,17 @@ const SettingsPage = () => {
         checkForUpdates: '检查新版本（Check for Updates）',
         contact: '联系方式',
         close: '关闭',
+        conversionTask: '格式转换',
+        extractionTask: '图片提取',
+        splittingTask: '图片分割',
+        stitchingTask: '图片拼接',
+        namingPattern: '命名规则',
+        sourceNameIndex: '原文件名-序号',
+        sourceNameDate: '原文件名-日期-序号',
+        outputFormat: '导出格式',
+        colorMode: '输出色彩模式',
+        grayCmyk: '灰度 CMYK',
+        outputQuality: '输出质量',
       };
 
   const updateDraft = (partial: Partial<PersistedSettings>) => {
@@ -168,6 +195,24 @@ const SettingsPage = () => {
 
   const cacheSizeText = formatCacheBytes(cacheUsage?.totalBytes ?? 0);
 
+  const taskCardCopy = (title: string): TaskSettingsCardCopy => ({
+    title,
+    namingPattern: copy.namingPattern,
+    sourceNameIndex: copy.sourceNameIndex,
+    sourceNameDate: copy.sourceNameDate,
+    outputFormat: copy.outputFormat,
+    colorMode: copy.colorMode,
+    grayCmyk: copy.grayCmyk,
+    outputQuality: copy.outputQuality
+  });
+
+  const updateTaskDraft = <K extends 'conversion' | 'extraction' | 'splitting' | 'stitching'>(
+    key: K,
+    partial: Partial<PersistedSettings[K]>
+  ) => {
+    updateDraft({ [key]: { ...formState[key], ...partial } } as Partial<PersistedSettings>);
+  };
+
   return (
     <div data-testid="settings-page-shell" className="flex flex-col h-full p-5 overflow-hidden bg-bg-main">
       <div className="flex-1 space-y-5 min-h-0 overflow-y-auto pr-2 custom-scrollbar">
@@ -182,6 +227,42 @@ const SettingsPage = () => {
           onOutputDirectoryStrategyChange={(outputDirectoryStrategy) => updateDraft({ outputDirectoryStrategy })}
           rememberLastParams={formState.rememberLastParams}
           onToggleRemember={() => updateDraft({ rememberLastParams: !formState.rememberLastParams })}
+        />
+        <TaskSettingsCard
+          copy={taskCardCopy(copy.conversionTask)}
+          value={formState.conversion}
+          formatOptions={['jpg', 'png', 'webp'] as TaskOutputFormat[]}
+          showColorMode
+          showQuality
+          disabled={state.isLoading}
+          onChange={(partial) => updateTaskDraft('conversion', partial)}
+        />
+        <TaskSettingsCard
+          copy={taskCardCopy(copy.extractionTask)}
+          value={formState.extraction}
+          formatOptions={['jpg', 'png'] as TaskOutputFormat[]}
+          showColorMode
+          showQuality={false}
+          disabled={state.isLoading}
+          onChange={(partial) => updateTaskDraft('extraction', partial as Partial<typeof formState.extraction>)}
+        />
+        <TaskSettingsCard
+          copy={taskCardCopy(copy.splittingTask)}
+          value={formState.splitting}
+          formatOptions={['jpg', 'png', 'webp'] as TaskOutputFormat[]}
+          showColorMode={false}
+          showQuality
+          disabled={state.isLoading}
+          onChange={(partial) => updateTaskDraft('splitting', partial)}
+        />
+        <TaskSettingsCard
+          copy={taskCardCopy(copy.stitchingTask)}
+          value={formState.stitching}
+          formatOptions={['jpg', 'png', 'webp'] as TaskOutputFormat[]}
+          showColorMode={false}
+          showQuality
+          disabled={state.isLoading}
+          onChange={(partial) => updateTaskDraft('stitching', partial)}
         />
         <CacheCard copy={copy} cacheSizeText={cacheSizeText} isLoading={isClearingCache} onClear={handleClearCache} />
       </div>

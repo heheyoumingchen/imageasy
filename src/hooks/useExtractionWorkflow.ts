@@ -2,9 +2,10 @@ import { useMemo, useState } from 'react';
 import { extractDocumentImages, inspectExtractionDirectory, inspectExtractionDocument } from '../services/extractionCommands';
 import { chooseOutputDirectory, openDirectoryInSystem, openExtractionDocuments, openExtractionSources } from '../services/fileDialog';
 import { useDragDropImport } from './useDragDropImport';
+import { getSettingsStore } from './useSettingsStore';
 import { sourceDirectory, sourceName } from '../utils/paths';
 import { toErrorMessage } from '../utils/errors';
-import type { ExtractionColorMode, ExtractionDocumentInfo, ExtractionNamingPattern, ExtractionOutputFormat } from '../types/extraction';
+import type { ExtractionDocumentInfo } from '../types/extraction';
 
 export type ExtractionItem = ExtractionDocumentInfo & {
   status: 'ready' | 'running' | 'success' | 'failed';
@@ -77,9 +78,6 @@ export const useExtractionWorkflow = () => {
   const [items, setItems] = useState<ExtractionItem[]>([]);
   const [outputDirectory, setOutputDirectory] = useState('');
   const [outputDirectoryManual, setOutputDirectoryManual] = useState(false);
-  const [outputFormat, setOutputFormat] = useState<ExtractionOutputFormat>('jpg');
-  const [colorMode, setColorMode] = useState<ExtractionColorMode>('rgb');
-  const [namingPattern, setNamingPattern] = useState<ExtractionNamingPattern>('source-name-index');
   const [pageError, setPageError] = useState<string | null>(null);
   const [isRunning, setIsRunning] = useState(false);
   const [failedDetailsOpen, setFailedDetailsOpen] = useState(false);
@@ -134,37 +132,10 @@ export const useExtractionWorkflow = () => {
 
   useDragDropImport(importSources, [outputDirectory]);
 
-  const selectOutputDirectory = async () => {
-    const selected = await chooseOutputDirectory(outputDirectory || undefined);
-    if (selected) {
-      setOutputDirectory(selected);
-      setOutputDirectoryManual(true);
-    }
-  };
-
   const openOutputDirectory = async () => {
     if (outputDirectory) {
       await openDirectoryInSystem(outputDirectory);
     }
-  };
-
-  const resetCompletedItems = () => {
-    setItems((current) => current.map(resetProcessedExtractionItem));
-  };
-
-  const handleOutputFormatChange = (value: ExtractionOutputFormat) => {
-    setOutputFormat(value);
-    resetCompletedItems();
-  };
-
-  const handleColorModeChange = (value: ExtractionColorMode) => {
-    setColorMode(value);
-    resetCompletedItems();
-  };
-
-  const handleNamingPatternChange = (value: ExtractionNamingPattern) => {
-    setNamingPattern(value);
-    resetCompletedItems();
   };
 
   const retryFailed = () => {
@@ -180,7 +151,19 @@ export const useExtractionWorkflow = () => {
   };
 
   const startExtraction = async (selectOutputDirectoryError: string) => {
-    if (!outputDirectory) {
+    const { extraction, outputDirectoryStrategy } = getSettingsStore().getState();
+
+    let targetDirectory = outputDirectory;
+    if (!targetDirectory && outputDirectoryStrategy === 'custom') {
+      const selected = await chooseOutputDirectory(undefined);
+      if (selected) {
+        setOutputDirectory(selected);
+        setOutputDirectoryManual(true);
+        targetDirectory = selected;
+      }
+    }
+
+    if (!targetDirectory) {
       setPageError(selectOutputDirectoryError);
       return;
     }
@@ -196,10 +179,10 @@ export const useExtractionWorkflow = () => {
       try {
         const result = await extractDocumentImages({
           sourcePath: item.sourcePath,
-          outputDirectory,
-          outputFormat,
-          colorMode,
-          namingPattern
+          outputDirectory: targetDirectory,
+          outputFormat: extraction.outputFormat,
+          colorMode: extraction.colorMode,
+          namingPattern: extraction.namingPattern
         });
         setItems((current) => markExtractionItemSucceeded(current, item.sourcePath, result.extractedCount));
       } catch (error) {
@@ -213,9 +196,6 @@ export const useExtractionWorkflow = () => {
   return {
     items,
     outputDirectory,
-    outputFormat,
-    colorMode,
-    namingPattern,
     pageError,
     isRunning,
     failedDetailsOpen,
@@ -223,11 +203,7 @@ export const useExtractionWorkflow = () => {
     stats,
     failedItems,
     importDocuments,
-    selectOutputDirectory,
     openOutputDirectory,
-    handleOutputFormatChange,
-    handleColorModeChange,
-    handleNamingPatternChange,
     retryFailed,
     toggleItemSelected,
     clearList,

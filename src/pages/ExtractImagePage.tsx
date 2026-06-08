@@ -3,7 +3,6 @@ import { useLanguage } from '../hooks/useLanguage';
 import { useExtractionWorkflow } from '../hooks/useExtractionWorkflow';
 import ConfirmDialog from '../components/feedback/ConfirmDialog';
 import BatchFooterBar from '../components/shared/BatchFooterBar';
-import ExtractionSettingsPanel from '../components/extraction/ExtractionSettingsPanel';
 import ExtractionItemList from '../components/extraction/ExtractionItemList';
 import ConversionBatchStatus from '../components/convert-image/ConversionBatchStatus';
 import { Plus, Play, Trash2 } from 'lucide-react';
@@ -12,9 +11,6 @@ const ExtractImagePage = () => {
   const {
     items,
     outputDirectory,
-    outputFormat,
-    colorMode,
-    namingPattern,
     pageError,
     isRunning,
     failedDetailsOpen,
@@ -22,11 +18,7 @@ const ExtractImagePage = () => {
     stats,
     failedItems,
     importDocuments,
-    selectOutputDirectory,
     openOutputDirectory,
-    handleOutputFormatChange,
-    handleColorModeChange,
-    handleNamingPatternChange,
     retryFailed,
     toggleItemSelected,
     clearList,
@@ -48,17 +40,6 @@ const ExtractImagePage = () => {
             statusRunning: 'Extracting',
             statusFailed: 'Failed',
             statusReady: 'Ready',
-            outputSettings: {
-              panelTitle: 'Extraction settings',
-              outputDirectory: 'Output directory',
-              chooseDirectory: 'Choose path',
-              outputFormat: 'Output format',
-              colorMode: 'Color mode',
-              namingPattern: 'Naming pattern',
-              namingPatternIndexed: 'Source name - index',
-              namingPatternDate: 'Source name - date',
-              grayCmyk: 'Gray CMYK',
-            },
             actions: {
               startExtraction: 'Start extraction',
               running: 'Extracting...',
@@ -99,17 +80,6 @@ const ExtractImagePage = () => {
             statusRunning: '提取中',
             statusFailed: '失败',
             statusReady: '待处理',
-            outputSettings: {
-              panelTitle: '提取设置',
-              outputDirectory: '输出目录',
-              chooseDirectory: '选择路径',
-              outputFormat: '导出格式',
-              colorMode: '输出色彩模式',
-              namingPattern: '命名规则',
-              namingPatternIndexed: '原文件名-序号',
-              namingPatternDate: '原文件名-日期-序号',
-              grayCmyk: '灰度 CMYK',
-            },
             actions: {
               startExtraction: '开始提取',
               running: '正在提取...',
@@ -195,18 +165,6 @@ const ExtractImagePage = () => {
         </div>
 
         <aside className="flex flex-col gap-4 overflow-y-auto pr-1 custom-scrollbar">
-          <ExtractionSettingsPanel
-            copy={copy.outputSettings}
-            outputDirectory={outputDirectory}
-            outputFormat={outputFormat}
-            colorMode={colorMode}
-            namingPattern={namingPattern}
-            onOutputDirectoryChange={selectOutputDirectory}
-            onOutputFormatChange={handleOutputFormatChange}
-            onColorModeChange={handleColorModeChange}
-            onNamingPatternChange={handleNamingPatternChange}
-          />
-
           <button
             type="button"
             className="w-full h-10 rounded-lg bg-meitu text-white font-bold text-sm transition-all hover:scale-[1.01] active:scale-[0.98] disabled:opacity-50 disabled:scale-100 flex items-center justify-center gap-2"

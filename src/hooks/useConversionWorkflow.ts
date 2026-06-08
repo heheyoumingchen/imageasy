@@ -9,11 +9,15 @@ import { useDragDropImport } from './useDragDropImport';
 import { openConversionSources, openConversionFiles, chooseOutputDirectory, openDirectoryInSystem } from '../services/fileDialog';
 import { getSettingsStore } from './useSettingsStore';
 import { useConversionStore } from '../stores/conversionStore';
+import type { ConversionTaskSettings } from '../stores/settingsStore';
 import type { ConversionItem, ConversionOutputFormat, ConversionOutputSettings, InspectConversionFileResult } from '../types/conversion';
 import { expandPageRange } from '../utils/pageRange';
 import { sourceDirectory } from '../utils/paths';
 import { toErrorMessage } from '../utils/errors';
 import { runConcurrentQueue } from '../utils/batchQueue';
+
+// 转换专属参数（来自 conversionStore）与公共任务设置（来自 settings store）合并后的批次快照。
+type ConversionBatchSettings = ConversionOutputSettings & ConversionTaskSettings;
 
 const toItem = (result: InspectConversionFileResult): ConversionItem => ({
   id: `${result.sourcePath}:${result.kind}`,
@@ -30,7 +34,7 @@ const toItem = (result: InspectConversionFileResult): ConversionItem => ({
   outputPaths: []
 });
 
-const buildImageOutputName = (item: ConversionItem, settings: ConversionOutputSettings) => {
+const buildImageOutputName = (item: ConversionItem, settings: ConversionBatchSettings) => {
   const targetExtension = settings.outputFormat;
   const stamp = new Date().toISOString().slice(0, 10).replace(/-/g, '');
 
@@ -39,7 +43,7 @@ const buildImageOutputName = (item: ConversionItem, settings: ConversionOutputSe
     : `${item.sourceStem}-001.${targetExtension}`;
 };
 
-const buildImageConversionRequest = (item: ConversionItem, settings: ConversionOutputSettings) => {
+const buildImageConversionRequest = (item: ConversionItem, settings: ConversionBatchSettings) => {
   const outputName = buildImageOutputName(item, settings);
   const outputFormat = (outputName.split('.').pop() ?? settings.outputFormat) as ConversionOutputFormat;
 
@@ -164,7 +168,7 @@ export const useConversionWorkflow = () => {
 
   const failedItems = items.filter((item) => item.status === 'failed');
 
-  const runConversionItem = async (item: ConversionItem, batchSettings: ConversionOutputSettings) => {
+  const runConversionItem = async (item: ConversionItem, batchSettings: ConversionBatchSettings) => {
     try {
       markItemRunning(item.id);
 
@@ -196,11 +200,28 @@ export const useConversionWorkflow = () => {
     setPageError(null);
 
     const readyItems = getReadyConversionItems(items);
-    if (readyItems.length === 0 || !globalSettings.outputDirectory.trim()) {
+    if (readyItems.length === 0) {
       return;
     }
 
-    const batchSettings = { ...globalSettings };
+    // same-as-source 策略沿用从源推断的 outputDirectory；custom 策略下若目录为空则弹框让用户选。
+    let outputDirectory = globalSettings.outputDirectory;
+    if (!outputDirectory.trim()) {
+      if (getSettingsStore().getState().outputDirectoryStrategy !== 'custom') {
+        return;
+      }
+
+      const chosen = await chooseOutputDirectory();
+      if (!chosen) {
+        return;
+      }
+
+      updateGlobalSettings({ outputDirectory: chosen });
+      outputDirectory = chosen;
+    }
+
+    const conversion = getSettingsStore().getState().conversion;
+    const batchSettings: ConversionBatchSettings = { ...globalSettings, ...conversion, outputDirectory };
 
     for (const item of readyItems.filter((entry) => entry.kind === 'document')) {
       try {
@@ -218,7 +239,10 @@ export const useConversionWorkflow = () => {
     setIsRunning(false);
   };
 
-  const canStart = canRunConversionBatch(items, globalSettings.outputDirectory);
+  const canStart =
+    getSettingsStore().getState().outputDirectoryStrategy === 'custom'
+      ? getReadyConversionItems(items).length > 0
+      : canRunConversionBatch(items, globalSettings.outputDirectory);
 
   return {
     items,

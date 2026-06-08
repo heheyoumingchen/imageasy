@@ -48,7 +48,12 @@ describe('SplitImagePage', () => {
     vi.clearAllMocks();
     vi.mocked(openSplittingSources).mockResolvedValue({ files: [], directories: [], cancelled: false });
     vi.mocked(splitImageFile).mockResolvedValue({ outputPaths: ['F:/demo/a-001.jpg', 'F:/demo/a-002.jpg'], splitCount: 2, skippedCount: 0 });
-    getSettingsStore().setState({ language: 'zh-CN', maxConcurrency: 2 });
+    getSettingsStore().setState({
+      language: 'zh-CN',
+      maxConcurrency: 2,
+      outputDirectoryStrategy: 'same-as-source',
+      splitting: { namingPattern: 'source-name-index', outputFormat: 'png', quality: 100 }
+    });
   });
 
   it('renders splitting workspace layout', () => {
@@ -63,8 +68,8 @@ describe('SplitImagePage', () => {
     expect(screen.getByRole('button', { name: '横向分割' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '竖向分割' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '网格分割' })).toBeInTheDocument();
-    expect(screen.getByLabelText('导出格式')).toBeInTheDocument();
-    expect(screen.getByRole('slider', { name: /图片质量/ })).toBeInTheDocument();
+    expect(screen.queryByLabelText('导出格式')).not.toBeInTheDocument();
+    expect(screen.queryByRole('slider', { name: /图片质量/ })).not.toBeInTheDocument();
     expect(screen.getByText('全局进度')).toBeInTheDocument();
   });
 
@@ -90,14 +95,13 @@ describe('SplitImagePage', () => {
     vi.mocked(openSplittingSources).mockResolvedValue({ files: ['F:/demo/a.jpg'], directories: [], cancelled: false });
     vi.mocked(inspectSplittingFile).mockResolvedValue(imageInfo);
     vi.mocked(splitImageFile).mockResolvedValue({ outputPaths: ['F:/demo/a-001.webp', 'F:/demo/a-002.webp', 'F:/demo/a-003.webp'], splitCount: 3, skippedCount: 0 });
+    getSettingsStore().setState({ splitting: { namingPattern: 'source-name-index', outputFormat: 'webp', quality: 80 } });
 
     render(<SplitImagePage />);
     await user.click(screen.getByRole('button', { name: '添加文件' }));
     await screen.findByText('a.jpg');
     await user.click(screen.getByRole('button', { name: '横向分割' }));
     fireEvent.change(screen.getByRole('slider', { name: /横向分割份数/ }), { target: { value: '3' } });
-    fireEvent.change(screen.getByRole('slider', { name: /图片质量/ }), { target: { value: '80' } });
-    await user.selectOptions(screen.getByLabelText('导出格式'), 'webp');
     await user.click(screen.getByRole('button', { name: '分割图片' }));
 
     await waitFor(() => expect(splitImageFile).toHaveBeenCalledWith({
