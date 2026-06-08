@@ -1,10 +1,15 @@
 import { Plus, X, Move } from 'lucide-react';
 import type { LayoutTemplate, CanvasRatio } from '../../types/stitchingLayout';
+import type { StitchingCanvasImage } from '../../types/stitching';
 
 type Props = {
   template: LayoutTemplate | null;
   canvasRatio: CanvasRatio;
-  images: Array<{ path: string; name: string; preview?: string }>;
+  padding: number;
+  spacing: number;
+  borderRadius: number;
+  backgroundColor: string;
+  images: Array<StitchingCanvasImage | undefined>;
   onAddImage: (cellIndex: number) => void;
   onRemoveImage: (cellIndex: number) => void;
   onImportImages: () => void;
@@ -18,7 +23,7 @@ const ratioValues: Record<CanvasRatio, number> = {
   '16:9': 16 / 9
 };
 
-const LayoutCanvas = ({ template, canvasRatio, images, onAddImage, onRemoveImage, onImportImages }: Props) => {
+const LayoutCanvas = ({ template, canvasRatio, padding, spacing, borderRadius, backgroundColor, images, onAddImage, onRemoveImage, onImportImages }: Props) => {
   if (!template) {
     return (
       <div className="flex flex-col items-center justify-center h-full bg-[#FAFBFD] text-[#8D93A1]">
@@ -44,33 +49,31 @@ const LayoutCanvas = ({ template, canvasRatio, images, onAddImage, onRemoveImage
     canvasWidth = canvasHeight * aspectRatio;
   }
 
-  const cellWidth = canvasWidth / template.cols;
-  const cellHeight = canvasHeight / template.rows;
-
   return (
     <div className="flex flex-col items-center justify-center h-full bg-[#FAFBFD] p-8">
       <div
-        className="bg-white shadow-lg rounded-lg overflow-hidden"
-        style={{ width: canvasWidth, height: canvasHeight }}
+        className="shadow-lg rounded-lg overflow-hidden"
+        style={{ width: canvasWidth, height: canvasHeight, backgroundColor, padding }}
       >
-        <div className="relative w-full h-full grid gap-0" style={{
+        <div className="relative w-full h-full grid" style={{
+          gap: spacing,
           gridTemplateColumns: `repeat(${template.cols}, 1fr)`,
           gridTemplateRows: `repeat(${template.rows}, 1fr)`
         }}>
           {template.cells.map((cell, index) => {
             const image = images[index];
-            const hasImage = Boolean(image);
 
             return (
               <div
                 key={index}
                 className="relative border border-dashed border-[#E2E4E9] bg-white overflow-hidden group"
                 style={{
+                  borderRadius,
                   gridColumn: `${cell.col + 1} / span ${cell.colSpan}`,
                   gridRow: `${cell.row + 1} / span ${cell.rowSpan}`
                 }}
               >
-                {hasImage ? (
+                {image ? (
                   <>
                     {image.preview ? (
                       <img

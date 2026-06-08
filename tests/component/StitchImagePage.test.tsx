@@ -9,6 +9,9 @@ import { getSettingsStore } from '../../src/hooks/useSettingsStore';
 
 vi.mock('../../src/services/fileDialog');
 vi.mock('../../src/services/stitchingCommands');
+vi.mock('@tauri-apps/api/core', () => ({
+  convertFileSrc: (path: string) => `asset://${path}`,
+}));
 vi.mock('@tauri-apps/api/webview', () => ({
   getCurrentWebview: vi.fn(() => ({
     onDragDropEvent: vi.fn(() => Promise.resolve(() => {})),
@@ -35,210 +38,129 @@ describe('StitchImagePage', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
-    getSettingsStore().setState({ language: 'zh-CN' });
+    getSettingsStore().setState({
+      language: 'zh-CN',
+      outputDirectoryStrategy: 'same-as-source',
+      stitching: { namingPattern: 'source-name-index', outputFormat: 'jpg', quality: 100 },
+    });
   });
 
   it('renders stitching workspace layout', () => {
     render(<StitchImagePage />);
-
+    expect(screen.getByText('布局拼接')).toBeInTheDocument();
+    expect(screen.getByText('布局模板')).toBeInTheDocument();
     expect(screen.getByText('拼接设置')).toBeInTheDocument();
-    expect(screen.getByText('开始拼接')).toBeInTheDocument();
-    expect(screen.getByText('图片拼接')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '添加图片' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '清空' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: '下载' })).toBeDisabled();
   });
 
-  it('imports files and folders and defaults output directory', async () => {
+  it('imports images and fills layout cells', async () => {
     vi.mocked(fileDialog.openStitchingSources).mockResolvedValue({
-      files: ['/test/a.jpg', '/test/b.png'],
-      directories: ['/test/folder'],
-      cancelled: false,
+      files: ['/test/a.jpg', '/test/b.png'], directories: ['/test/folder'], cancelled: false,
     });
-
     vi.mocked(stitchingCommands.inspectStitchingFile).mockImplementation(async (path: string) => {
-      if (path === '/test/a.jpg') {
-        return createMockInspection({ sourcePath: '/test/a.jpg', sourceName: 'a.jpg' });
-      }
-      if (path === '/test/b.png') {
-        return createMockInspection({ sourcePath: '/test/b.png', sourceName: 'b.png' });
-      }
+      if (path === '/test/a.jpg') return createMockInspection({ sourcePath: '/test/a.jpg', sourceName: 'a.jpg' });
+      if (path === '/test/b.png') return createMockInspection({ sourcePath: '/test/b.png', sourceName: 'b.png' });
       throw new Error('unknown file');
     });
-
     vi.mocked(stitchingCommands.inspectStitchingDirectory).mockResolvedValue([
       createMockInspection({ sourcePath: '/test/folder/c.webp', sourceName: 'c.webp' }),
     ]);
-
-    vi.mocked(fileDialog.chooseOutputDirectory).mockResolvedValue('/test/output');
-
     render(<StitchImagePage />);
-
-    await user.click(screen.getByText('添加文件'));
-
-    await waitFor(() => {
-      expect(screen.getByText('a.jpg')).toBeInTheDocument();
-      expect(screen.getByText('b.png')).toBeInTheDocument();
-      expect(screen.getByText('c.webp')).toBeInTheDocument();
-    });
-
-    // Output directory is auto-inferred from first directory
-    await waitFor(() => {
-      const outputInput = screen.getByLabelText('输出目录') as HTMLInputElement;
-      expect(outputInput.value).toBe('/test/folder');
-    });
+    await user.click(screen.getByRole('button', { name: '添加图片' }));
+    expect(await screen.findByAltText('a.jpg')).toHaveAttribute('src', 'asset:///test/a.jpg');
+    expect(screen.getByAltText('b.png')).toHaveAttribute('src', 'asset:///test/b.png');
+    expect(screen.getByAltText('c.webp')).toHaveAttribute('src', 'asset:///test/folder/c.webp');
   });
 
-  it('starts stitching with selected settings', async () => {
+  it('infers same-as-source output directory from the first image when stitching', async () => {
     vi.mocked(fileDialog.openStitchingSources).mockResolvedValue({
-      files: ['/test/a.jpg', '/test/b.jpg'],
-      directories: [],
-      cancelled: false,
+      files: ['/test/a.jpg', '/test/b.jpg'], directories: [], cancelled: false,
     });
-
     vi.mocked(stitchingCommands.inspectStitchingFile).mockImplementation(async (path: string) => {
-      if (path === '/test/a.jpg') {
-        return createMockInspection({ sourcePath: '/test/a.jpg', sourceName: 'a.jpg' });
-      }
-      if (path === '/test/b.jpg') {
-        return createMockInspection({ sourcePath: '/test/b.jpg', sourceName: 'b.jpg' });
-      }
+      if (path === '/test/a.jpg') return createMockInspection({ sourcePath: '/test/a.jpg', sourceName: 'a.jpg' });
+      if (path === '/test/b.jpg') return createMockInspection({ sourcePath: '/test/b.jpg', sourceName: 'b.jpg' });
       throw new Error('unknown');
     });
-
     vi.mocked(stitchingCommands.stitchImageFiles).mockResolvedValue({
-      outputPath: '/test/a-stitch-001.jpg',
-      stitchedCount: 2,
+      outputPath: '/test/a-stitch-001.jpg', stitchedCount: 2,
     });
-
     render(<StitchImagePage />);
-
-    await user.click(screen.getByText('添加文件'));
-
+    await user.click(screen.getByRole('button', { name: '添加图片' }));
+    expect(await screen.findByAltText('a.jpg')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: '下载' }));
     await waitFor(() => {
-      expect(screen.getByText('a.jpg')).toBeInTheDocument();
+      expect(stitchingCommands.stitchImageFiles).toHaveBeenCalledWith(expect.objectContaining({
+        outputDirectory: '/test',
+      }));
     });
-
-    const startButton = screen.getByText('开始拼接');
-    await user.click(startButton);
-
-    await waitFor(() => {
-      expect(stitchingCommands.stitchImageFiles).toHaveBeenCalledWith(
-        expect.objectContaining({
-          sourcePaths: ['/test/a.jpg', '/test/b.jpg'],
-          outputDirectory: '/test',
-          outputFormat: 'jpg',
-          columns: 2,
-          backgroundColor: '#FFFFFF',
-          namingPattern: 'source-name-index',
-        })
-      );
-    });
-
-    await waitFor(() => {
-      expect(screen.getAllByText('成功').length).toBeGreaterThan(0);
-    });
+    expect(fileDialog.chooseOutputDirectory).not.toHaveBeenCalled();
   });
 
-  it('shows failed details and retries failed items', async () => {
-    vi.mocked(fileDialog.openStitchingSources).mockResolvedValue({
-      files: ['/test/a.jpg', '/test/b.jpg'],
-      directories: [],
-      cancelled: false,
+  it('starts stitching with custom output directory and global export settings', async () => {
+    getSettingsStore().setState({
+      outputDirectoryStrategy: 'custom',
+      stitching: { namingPattern: 'source-name-date', outputFormat: 'png', quality: 80 },
     });
-
+    vi.mocked(fileDialog.openStitchingSources).mockResolvedValue({
+      files: ['/test/a.jpg', '/test/b.jpg'], directories: [], cancelled: false,
+    });
+    vi.mocked(fileDialog.chooseOutputDirectory).mockResolvedValue('/test/output');
     vi.mocked(stitchingCommands.inspectStitchingFile).mockImplementation(async (path: string) => {
-      if (path === '/test/a.jpg') {
-        return createMockInspection({ sourcePath: '/test/a.jpg', sourceName: 'a.jpg' });
-      }
-      if (path === '/test/b.jpg') {
-        return createMockInspection({ sourcePath: '/test/b.jpg', sourceName: 'b.jpg' });
-      }
+      if (path === '/test/a.jpg') return createMockInspection({ sourcePath: '/test/a.jpg', sourceName: 'a.jpg' });
+      if (path === '/test/b.jpg') return createMockInspection({ sourcePath: '/test/b.jpg', sourceName: 'b.jpg' });
       throw new Error('unknown');
     });
-
-    let callCount = 0;
-    vi.mocked(stitchingCommands.stitchImageFiles).mockImplementation(async () => {
-      callCount++;
-      if (callCount === 1) {
-        throw new Error('列数必须在 1-12 之间');
-      }
-      return {
-        outputPath: '/test/a-stitch-001.jpg',
-        stitchedCount: 2,
-      };
+    vi.mocked(stitchingCommands.stitchImageFiles).mockResolvedValue({
+      outputPath: '/test/output/a-stitch-001.jpg', stitchedCount: 2,
     });
-
     render(<StitchImagePage />);
-
-    await user.click(screen.getByText('添加文件'));
-
+    await user.click(screen.getByRole('button', { name: '添加图片' }));
+    expect(await screen.findByAltText('a.jpg')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: '下载' }));
     await waitFor(() => {
-      expect(screen.getByText('a.jpg')).toBeInTheDocument();
+      expect(stitchingCommands.stitchImageFiles).toHaveBeenCalledWith(expect.objectContaining({
+        rows: 2, cols: 2, canvasRatio: '1:1', resolution: 1080, padding: 0, spacing: 0,
+        borderRadius: 0, backgroundColor: '#FFFFFF', quality: 80, outputDirectory: '/test/output',
+        outputFormat: 'png', namingPattern: 'source-name-date',
+        cells: [
+          { sourcePath: '/test/a.jpg', row: 0, col: 0, rowSpan: 1, colSpan: 1 },
+          { sourcePath: '/test/b.jpg', row: 0, col: 1, rowSpan: 1, colSpan: 1 },
+          { sourcePath: '', row: 1, col: 0, rowSpan: 1, colSpan: 1 },
+          { sourcePath: '', row: 1, col: 1, rowSpan: 1, colSpan: 1 },
+        ],
+      }));
     });
+    expect(fileDialog.chooseOutputDirectory).toHaveBeenCalled();
+    expect(await screen.findByText('已导出：/test/output/a-stitch-001.jpg')).toBeInTheDocument();
+  });
 
-    await user.click(screen.getByText('开始拼接'));
-
-    await waitFor(() => expect(screen.getAllByText('失败').length).toBeGreaterThan(0));
-
-    const failedDetailsButton = screen.getByText('查看失败详情');
-    await user.click(failedDetailsButton);
-
-    expect((await screen.findAllByText('列数必须在 1-12 之间')).length).toBeGreaterThan(0);
-
-    const closeButton = screen.getByRole('button', { name: '关闭' });
-    await user.click(closeButton);
-
-    await waitFor(() => {
-      expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  it('shows an error when stitching fails', async () => {
+    vi.mocked(fileDialog.openStitchingSources).mockResolvedValue({
+      files: ['/test/a.jpg', '/test/b.jpg'], directories: [], cancelled: false,
     });
-
-    const retryButton = screen.getByText('重试失败');
-    await user.click(retryButton);
-
-    await waitFor(() => {
-      expect(screen.getAllByText('成功').length).toBeGreaterThan(0);
+    vi.mocked(stitchingCommands.inspectStitchingFile).mockImplementation(async (path: string) => {
+      if (path === '/test/a.jpg') return createMockInspection({ sourcePath: '/test/a.jpg', sourceName: 'a.jpg' });
+      if (path === '/test/b.jpg') return createMockInspection({ sourcePath: '/test/b.jpg', sourceName: 'b.jpg' });
+      throw new Error('unknown');
     });
+    vi.mocked(stitchingCommands.stitchImageFiles).mockRejectedValue(new Error('输出尺寸过大'));
+    render(<StitchImagePage />);
+    await user.click(screen.getByRole('button', { name: '添加图片' }));
+    expect(await screen.findByAltText('a.jpg')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: '下载' }));
+    expect(await screen.findByText('输出尺寸过大')).toBeInTheDocument();
   });
 
   it('re-renders stitching copy when language changes', async () => {
     render(<StitchImagePage />);
-
-    expect(screen.getByText('拼接设置')).toBeInTheDocument();
-    expect(screen.getByText('开始拼接')).toBeInTheDocument();
-
-    act(() => {
-      getSettingsStore().setState({ language: 'en-US' });
-    });
-
+    expect(screen.getByText('布局拼接')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '下载' })).toBeInTheDocument();
+    act(() => { getSettingsStore().setState({ language: 'en-US' }); });
     await waitFor(() => {
-      expect(screen.getByText('Stitching settings')).toBeInTheDocument();
-      expect(screen.getByText('Start stitching')).toBeInTheDocument();
+      expect(screen.getByText('Layout Stitching')).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Download' })).toBeInTheDocument();
     });
-  });
-
-  it('opens the selected output directory', async () => {
-    vi.mocked(fileDialog.openStitchingSources).mockResolvedValue({
-      files: ['/test/a.jpg'],
-      directories: [],
-      cancelled: false,
-    });
-
-    vi.mocked(stitchingCommands.inspectStitchingFile).mockResolvedValue(
-      createMockInspection({ sourcePath: '/test/a.jpg', sourceName: 'a.jpg' })
-    );
-
-    const mockOpen = vi.fn().mockResolvedValue(undefined);
-    vi.mocked(fileDialog.openDirectoryInSystem).mockImplementation(mockOpen);
-
-    render(<StitchImagePage />);
-
-    await user.click(screen.getByText('添加文件'));
-
-    await waitFor(() => {
-      expect(screen.getByText('a.jpg')).toBeInTheDocument();
-    });
-
-    const outputText = screen.getByText('/test');
-    await user.click(outputText);
-
-    expect(mockOpen).toHaveBeenCalledWith('/test');
   });
 });
