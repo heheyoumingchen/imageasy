@@ -6,7 +6,17 @@ import { inspectSplittingDirectory, inspectSplittingFile, splitImageFile } from 
 import { runConcurrentQueue } from '../utils/batchQueue';
 import { toErrorMessage } from '../utils/errors';
 import { sourceDirectory } from '../utils/paths';
-import type { InspectSplittingFileResult, SplittingDirection, SplittingItem, SplittingMode, SplittingNamingPattern, SplittingOutputFormat } from '../types/splitting';
+import type { InspectSplittingFileResult, SplittingItem, SplittingMode, SplittingNamingPattern, SplittingOutputFormat } from '../types/splitting';
+
+const gridForMode = (mode: SplittingMode, horizontalSplits: number, verticalSplits: number) => {
+  if (mode === 'horizontal') {
+    return { columns: horizontalSplits, rows: 1 };
+  }
+  if (mode === 'vertical') {
+    return { columns: 1, rows: verticalSplits };
+  }
+  return { columns: horizontalSplits, rows: verticalSplits };
+};
 
 const createItem = (result: InspectSplittingFileResult): SplittingItem => ({
   ...result,
@@ -33,8 +43,6 @@ export const useSplittingWorkflow = () => {
   const [horizontalSplits, setHorizontalSplits] = useState(2);
   const [verticalSplits, setVerticalSplits] = useState(2);
   const [quality, setQuality] = useState(100);
-  const [splitDirection, setSplitDirection] = useState<SplittingDirection>('vertical');
-  const [ratio, setRatio] = useState(50);
   const [namingPattern, setNamingPattern] = useState<SplittingNamingPattern>('source-name-index');
   const [pageError, setPageError] = useState<string | null>(null);
   const [isRunning, setIsRunning] = useState(false);
@@ -87,9 +95,7 @@ export const useSplittingWorkflow = () => {
   const updateHorizontalSplits = (value: number) => { setHorizontalSplits(value); resetCompletedItems(); };
   const updateVerticalSplits = (value: number) => { setVerticalSplits(value); resetCompletedItems(); };
   const updateQuality = (value: number) => { setQuality(value); resetCompletedItems(); };
-  const updateSplitDirection = (value: SplittingDirection) => { setSplitDirection(value); resetCompletedItems(); };
   const updateNamingPattern = (value: SplittingNamingPattern) => { setNamingPattern(value); resetCompletedItems(); };
-  const updateRatio = (value: number) => { setRatio(value); resetCompletedItems(); };
 
   const toggleItemSelected = (sourcePath: string) => {
     setItems((current) => current.map((item) => item.sourcePath === sourcePath ? { ...item, selected: !item.selected } : item));
@@ -113,17 +119,25 @@ export const useSplittingWorkflow = () => {
   const runItem = async (item: SplittingItem) => {
     setItems((current) => markItem(current, item.sourcePath, { status: 'running', errorMessage: null, outputPaths: [], splitCount: 0 }));
     try {
-      const result = await splitImageFile({ sourcePath: item.sourcePath, outputDirectory, outputFormat, splitDirection, ratio, namingPattern });
+      const { columns, rows } = gridForMode(mode, horizontalSplits, verticalSplits);
+      const result = await splitImageFile({
+        sourcePath: item.sourcePath,
+        outputDirectory,
+        outputFormat,
+        columns,
+        rows,
+        quality,
+        namingPattern
+      });
       setItems((current) => markItem(current, item.sourcePath, { status: 'success', outputPaths: result.outputPaths, splitCount: result.splitCount, errorMessage: null }));
     } catch (error) {
       setItems((current) => markItem(current, item.sourcePath, { status: 'failed', errorMessage: toErrorMessage(error) }));
     }
   };
 
-  const startSplitting = async (copyErrors: { outputDirectoryRequired: string; ratioInvalid: string }) => {
+  const startSplitting = async (copyErrors: { outputDirectoryRequired: string }) => {
     if (isRunning) return;
     if (!outputDirectory) { setPageError(copyErrors.outputDirectoryRequired); return; }
-    if (ratio < 1 || ratio > 99) { setPageError(copyErrors.ratioInvalid); return; }
     const readyItems = items.filter((item) => item.status === 'ready' && item.selected);
     if (readyItems.length === 0) return;
     setPageError(null);
@@ -134,12 +148,12 @@ export const useSplittingWorkflow = () => {
 
   return {
     items, outputDirectory, outputFormat, mode, horizontalSplits, verticalSplits, quality,
-    splitDirection, ratio, namingPattern,
+    namingPattern,
     pageError, isRunning, failedDetailsOpen, setFailedDetailsOpen, stats, failedItems,
     canStart: items.some((item) => item.status === 'ready' && item.selected) && Boolean(outputDirectory),
     importFiles, selectOutputDirectory, openOutputDirectory,
     updateOutputFormat, updateMode, updateHorizontalSplits, updateVerticalSplits, updateQuality,
-    updateSplitDirection, updateNamingPattern, updateRatio,
+    updateNamingPattern,
     retryFailed, toggleItemSelected, clearList, startSplitting,
   };
 };
