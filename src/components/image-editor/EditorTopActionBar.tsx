@@ -1,44 +1,166 @@
+import { FolderOpen, Undo2, Redo2, FileOutput, RotateCcw, RotateCw, ZoomIn, Crop, Trash2 } from 'lucide-react';
+
 type EditorTopActionBarProps = {
   hasUnsavedChanges: boolean;
   canUndo: boolean;
   canRedo: boolean;
+  isBusy: boolean;
+  canDelete?: boolean;
+  isEnglish?: boolean;
   onOpenImage: () => void;
   onUndo: () => void;
   onRedo: () => void;
   onSave: () => void;
+  onRotateLeft?: () => void;
+  onRotateRight?: () => void;
+  onZoom?: () => void;
+  onCrop?: () => void;
+  onDelete?: () => void;
 };
 
-const buttonClass =
-  'inline-flex h-9 min-w-[84px] items-center justify-center rounded-full border border-[#ececf2] bg-white px-3.5 text-sm font-medium text-[#515867] transition hover:border-[#ff9fbd] hover:text-[#ff5c93] disabled:cursor-not-allowed disabled:opacity-40';
+const EditorTopActionBar = ({
+  hasUnsavedChanges,
+  canUndo,
+  canRedo,
+  isBusy,
+  canDelete = false,
+  isEnglish = false,
+  onOpenImage,
+  onUndo,
+  onRedo,
+  onSave,
+  onRotateLeft,
+  onRotateRight,
+  onZoom,
+  onCrop,
+  onDelete
+}: EditorTopActionBarProps) => {
+  const copy = isEnglish
+    ? {
+        openImage: 'Open',
+        undo: 'Undo',
+        redo: 'Redo',
+        rotateLeft: 'Rotate Left',
+        rotateRight: 'Rotate Right',
+        zoom: 'Zoom',
+        crop: 'Crop',
+        delete: 'Delete',
+        saveJpg: 'Export'
+      }
+    : {
+        openImage: '打开',
+        undo: '撤销',
+        redo: '重做',
+        rotateLeft: '左旋转',
+        rotateRight: '右旋转',
+        zoom: '缩放',
+        crop: '裁剪',
+        delete: '删除',
+        saveJpg: '导出'
+      };
 
-const primaryButtonClass =
-  'inline-flex h-9 min-w-[84px] items-center justify-center rounded-full bg-[linear-gradient(135deg,#ff6b9f_0%,#8d7dff_100%)] px-3.5 text-sm font-medium text-white shadow-[0_12px_28px_rgba(255,105,160,0.25)] transition hover:brightness-105 disabled:cursor-not-allowed disabled:opacity-40';
-
-const EditorTopActionBar = ({ hasUnsavedChanges, canUndo, canRedo, onOpenImage, onUndo, onRedo, onSave }: EditorTopActionBarProps) => {
   return (
-    <section aria-label="顶部主动作区" className="mb-4 rounded-[20px] border border-[#ececf2] bg-white px-4 py-3.5 shadow-[0_10px_24px_rgba(23,28,41,0.04)]">
-      <div className="flex flex-wrap items-center justify-between gap-4">
-        <div>
-          <h3 className="text-sm font-semibold text-[#2f3440]">图片编辑</h3>
-          <p className="mt-1 text-xs text-[#9aa0ab]">打开、撤销、重做与导出操作集中显示。</p>
+    <header data-testid="editor-top-action-bar" className="min-w-0 flex items-center justify-between mb-2 bg-white rounded-lg border border-border-light px-5 py-2">
+      <div data-testid="editor-toolbar-groups" className="min-w-0 flex items-center gap-2 overflow-x-auto no-scrollbar pr-3">
+        <button
+          type="button"
+          className="flex h-10 items-center justify-center gap-2 rounded border border-border-light bg-white px-4 text-[13px] font-bold text-[#515867] transition-all duration-200 hover:border-meitu hover:text-meitu active:scale-95 disabled:opacity-40"
+          onClick={onOpenImage}
+          disabled={isBusy}
+        >
+          <FolderOpen size={20} className="text-meitu" />
+          {copy.openImage}
+        </button>
+
+        <div className="w-px h-5 bg-border-light/60 mx-1" />
+
+        <div className="flex items-center gap-1">
+          <button
+            type="button"
+            className="flex h-10 w-10 items-center justify-center rounded text-[#515867] transition-all hover:bg-bg-main hover:text-meitu active:scale-95 disabled:opacity-30"
+            onClick={onUndo}
+            disabled={!canUndo}
+            title={copy.undo}
+          >
+            <Undo2 size={20} />
+          </button>
+          <button
+            type="button"
+            className="flex h-10 w-10 items-center justify-center rounded text-[#515867] transition-all hover:bg-bg-main hover:text-meitu active:scale-95 disabled:opacity-30"
+            onClick={onRedo}
+            disabled={!canRedo}
+            title={copy.redo}
+          >
+            <Redo2 size={20} />
+          </button>
         </div>
 
-        <div className="flex flex-wrap items-center gap-2.5">
-          <button type="button" className={buttonClass} onClick={onOpenImage}>
-            打开图片
+        <div className="w-px h-5 bg-border-light/60 mx-1" />
+
+        <div className="flex items-center gap-1">
+          <button
+            type="button"
+            className="flex h-10 w-10 items-center justify-center rounded text-[#515867] transition-all hover:bg-bg-main hover:text-meitu active:scale-95 disabled:opacity-40"
+            onClick={onRotateLeft}
+            disabled={isBusy}
+            title={copy.rotateLeft}
+          >
+            <RotateCcw size={20} />
           </button>
-          <button type="button" className={buttonClass} onClick={onUndo} disabled={!canUndo}>
-            撤销
+          <button
+            type="button"
+            className="flex h-10 w-10 items-center justify-center rounded text-[#515867] transition-all hover:bg-bg-main hover:text-meitu active:scale-95 disabled:opacity-40"
+            onClick={onRotateRight}
+            disabled={isBusy}
+            title={copy.rotateRight}
+          >
+            <RotateCw size={20} />
           </button>
-          <button type="button" className={buttonClass} onClick={onRedo} disabled={!canRedo}>
-            重做
+        </div>
+
+        <div className="w-px h-5 bg-border-light/60 mx-1" />
+
+        <div className="flex items-center gap-1">
+          <button
+            type="button"
+            className="flex h-10 w-10 items-center justify-center rounded text-[#515867] transition-all hover:bg-bg-main hover:text-meitu active:scale-95 disabled:opacity-40"
+            onClick={onZoom}
+            disabled={isBusy}
+            title={copy.zoom}
+          >
+            <ZoomIn size={20} />
           </button>
-          <button type="button" className={primaryButtonClass} onClick={onSave} disabled={!hasUnsavedChanges} aria-label="保存 JPG">
-            保存
+          <button
+            type="button"
+            className="flex h-10 w-10 items-center justify-center rounded text-[#515867] transition-all hover:bg-bg-main hover:text-meitu active:scale-95 disabled:opacity-40"
+            onClick={onCrop}
+            disabled={isBusy}
+            title={copy.crop}
+          >
+            <Crop size={20} />
+          </button>
+          <button
+            type="button"
+            className="flex h-10 w-10 items-center justify-center rounded text-[#515867] transition-all hover:bg-bg-main hover:text-red-500 active:scale-95 disabled:opacity-40"
+            onClick={onDelete}
+            disabled={isBusy || !canDelete}
+            title={copy.delete}
+          >
+            <Trash2 size={20} />
           </button>
         </div>
       </div>
-    </section>
+
+      <button
+        type="button"
+        className="shrink-0 flex h-10 items-center justify-center gap-2 rounded-lg bg-meitu px-6 text-[13px] font-bold text-white transition-all duration-300 hover:brightness-110 active:scale-95 disabled:opacity-50"
+        onClick={onSave}
+        disabled={!hasUnsavedChanges || isBusy}
+      >
+        <FileOutput size={20} />
+        {copy.saveJpg}
+      </button>
+    </header>
   );
 };
 

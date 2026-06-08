@@ -1,6 +1,20 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createSettingsStore, DEFAULT_SETTINGS } from '../../src/stores/settingsStore';
 
+const loadedSettings = {
+  ...DEFAULT_SETTINGS,
+  maxConcurrency: 6,
+  outputDirectoryStrategy: 'custom',
+  rememberLastParams: true
+} as const;
+
+const savedSettings = {
+  ...DEFAULT_SETTINGS,
+  maxConcurrency: 4,
+  outputDirectoryStrategy: 'custom',
+  rememberLastParams: true
+} as const;
+
 const { loadSettings, saveSettings } = vi.hoisted(() => ({
   loadSettings: vi.fn(),
   saveSettings: vi.fn()
@@ -24,13 +38,7 @@ describe('settingsStore', () => {
   });
 
   it('loads persisted settings through the Tauri settings command', async () => {
-    loadSettings.mockResolvedValue({
-      theme: 'dark',
-      language: 'zh-CN',
-      maxConcurrency: 6,
-      outputDirectoryStrategy: 'custom',
-      rememberLastParams: true
-    });
+    loadSettings.mockResolvedValue(loadedSettings);
     const store = createSettingsStore();
 
     await store.getState().load();
@@ -48,13 +56,7 @@ describe('settingsStore', () => {
   });
 
   it('saves updated settings through the Tauri settings command', async () => {
-    saveSettings.mockResolvedValue({
-      theme: 'dark',
-      language: 'zh-CN',
-      maxConcurrency: 4,
-      outputDirectoryStrategy: 'custom',
-      rememberLastParams: true
-    });
+    saveSettings.mockResolvedValue(savedSettings);
     const store = createSettingsStore();
 
     await store.getState().updateSettings({
@@ -63,13 +65,7 @@ describe('settingsStore', () => {
       rememberLastParams: true
     });
 
-    expect(saveSettings).toHaveBeenCalledWith({
-      theme: 'dark',
-      language: 'zh-CN',
-      maxConcurrency: 4,
-      outputDirectoryStrategy: 'custom',
-      rememberLastParams: true
-    });
+    expect(saveSettings).toHaveBeenCalledWith(savedSettings);
     expect(store.getState()).toEqual(
       expect.objectContaining({
         maxConcurrency: 4,

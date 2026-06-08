@@ -1,11 +1,16 @@
-use anyhow::{Context, Result};
-use image::{
-    codecs::jpeg::JpegEncoder, codecs::png::PngEncoder, codecs::webp::WebPEncoder, ColorType,
-    DynamicImage, GenericImageView, ImageEncoder,
+use super::{
+    common::{apply_color_mode, current_date_stamp, extension, normalized_format, write_dynamic_image},
+    pdf_rendering::render_pdf_pages,
 };
-use pdfium_render::prelude::*;
+use anyhow::{Context, Result};
+use image::GenericImageView;
 use serde::{Deserialize, Serialize};
-use std::{fs, path::{Path, PathBuf}, process::Command};
+use std::{
+    fs,
+    path::{Path, PathBuf},
+    process::Command,
+};
+use tauri::Manager;
 use walkdir::WalkDir;
 
 #[derive(Debug, Clone, Serialize)]
@@ -56,11 +61,13 @@ pub struct RenderDocumentToImagesRequest {
     pub naming_pattern: String,
 }
 
-fn extension(path: &Path) -> String {
-    path.extension()
-        .and_then(|value| value.to_str())
-        .unwrap_or_default()
-        .to_lowercase()
+fn output_format_extension(output_format: &str) -> String {
+    match normalized_format(output_format).as_str() {
+        "jpg" => "jpg".to_string(),
+        "png" => "png".to_string(),
+        "webp" => "webp".to_string(),
+        other => other.to_string(),
+    }
 }
 
 fn is_image(path: &Path) -> bool {
@@ -70,6 +77,15 @@ fn is_image(path: &Path) -> bool {
 fn is_document(path: &Path) -> bool {
     matches!(extension(path).as_str(), "pdf" | "docx")
 }
+
+fn dated_name(stem: &str, index: u32, output_format: &str) -> String {
+    format!("{}-{}-{:03}.{}", stem, current_date_stamp(), index, output_format_extension(output_format))
+}
+
+fn indexed_name(stem: &str, index: u32, output_format: &str) -> String {
+    format!("{}-{:03}.{}", stem, index, output_format_extension(output_format))
+}
+
 
 #[tauri::command]
 pub fn inspect_conversion_file(path: String) -> Result<InspectConversionFileResult, String> {
@@ -87,8 +103,12 @@ pub fn convert_image_file(request: ConvertImageFileRequest) -> Result<Vec<String
 }
 
 #[tauri::command]
-pub fn render_document_to_images(request: RenderDocumentToImagesRequest) -> Result<Vec<String>, String> {
-    render_document_to_images_impl(request).map_err(|error| error.to_string())
+pub fn render_document_to_images(
+    app: tauri::AppHandle,
+    request: RenderDocumentToImagesRequest,
+) -> Result<Vec<String>, String> {
+    let resource_dir = app.path().resource_dir().ok();
+    render_document_to_images_impl(request, resource_dir).map_err(|error| error.to_string())
 }
 
 fn inspect_conversion_file_impl(path: &str) -> Result<InspectConversionFileResult> {
@@ -153,38 +173,21 @@ fn inspect_conversion_directory_impl(path: &str) -> Result<Vec<InspectConversion
     Ok(items)
 }
 
-fn apply_color_mode(image: DynamicImage, color_mode: &str) -> DynamicImage {
-    match color_mode {
-        "gray-cmyk" => DynamicImage::ImageLuma8(image.grayscale().to_luma8()),
-        _ => DynamicImage::ImageRgb8(image.to_rgb8()),
-    }
-}
-
 fn convert_image_file_impl(request: ConvertImageFileRequest) -> Result<Vec<String>> {
     let source = image::open(&request.source_path)
         .with_context(|| format!("无法打开图片: {}", request.source_path))?;
     let output = apply_color_mode(source, &request.color_mode);
+    let requested_output_format = normalized_format(&request.output_format);
     let output_path = PathBuf::from(&request.output_path);
 
     if let Some(parent) = output_path.parent() {
         fs::create_dir_all(parent).with_context(|| format!("无法创建输出目录: {}", parent.display()))?;
     }
 
-    let file = fs::File::create(&output_path)
-        .with_context(|| format!("无法创建输出文件: {}", output_path.display()))?;
-    let mut writer = std::io::BufWriter::new(file);
-    let rgb = output.to_rgb8();
-    let (width, height) = rgb.dimensions();
+    let actual_output_path = output_path.with_extension(output_format_extension(&requested_output_format));
+    write_dynamic_image(&actual_output_path, &output, &requested_output_format, request.quality)?;
 
-    match request.output_format.as_str() {
-        "jpg" => JpegEncoder::new_with_quality(&mut writer, request.quality.unwrap_or(90))
-            .encode(&rgb, width, height, ColorType::Rgb8.into())?,
-        "png" => PngEncoder::new(&mut writer).write_image(&rgb, width, height, ColorType::Rgb8.into())?,
-        "webp" => WebPEncoder::new_lossless(&mut writer).encode(&rgb, width, height, ColorType::Rgb8.into())?,
-        other => anyhow::bail!("不支持的输出格式: {other}"),
-    }
-
-    Ok(vec![output_path.to_string_lossy().into_owned()])
+    Ok(vec![actual_output_path.to_string_lossy().into_owned()])
 }
 
 fn soffice_executable() -> Result<String> {
@@ -193,12 +196,6 @@ fn soffice_executable() -> Result<String> {
     } else {
         anyhow::bail!("DOCX_RENDERER_NOT_AVAILABLE: soffice 未安装或不在 PATH 中")
     }
-}
-
-fn bind_pdfium() -> Result<Pdfium> {
-    let bindings = Pdfium::bind_to_system_library()
-        .map_err(|_| anyhow::anyhow!("PDF_RENDERER_NOT_AVAILABLE: 未找到 PDFium 运行库"))?;
-    Ok(Pdfium::new(bindings))
 }
 
 fn docx_to_pdf(source_path: &str, work_dir: &Path) -> Result<PathBuf> {
@@ -221,25 +218,10 @@ fn docx_to_pdf(source_path: &str, work_dir: &Path) -> Result<PathBuf> {
     Ok(work_dir.join(stem).with_extension("pdf"))
 }
 
-fn write_dynamic_image(output_path: &Path, image: DynamicImage, output_format: &str, quality: Option<u8>) -> Result<()> {
-    let file = fs::File::create(output_path)
-        .with_context(|| format!("无法创建输出文件: {}", output_path.display()))?;
-    let mut writer = std::io::BufWriter::new(file);
-    let rgb = image.to_rgb8();
-    let (width, height) = rgb.dimensions();
-
-    match output_format {
-        "jpg" => JpegEncoder::new_with_quality(&mut writer, quality.unwrap_or(90))
-            .encode(&rgb, width, height, ColorType::Rgb8.into())?,
-        "png" => PngEncoder::new(&mut writer).write_image(&rgb, width, height, ColorType::Rgb8.into())?,
-        "webp" => WebPEncoder::new_lossless(&mut writer).encode(&rgb, width, height, ColorType::Rgb8.into())?,
-        other => anyhow::bail!("不支持的输出格式: {other}"),
-    }
-
-    Ok(())
-}
-
-fn render_document_to_images_impl(request: RenderDocumentToImagesRequest) -> Result<Vec<String>> {
+fn render_document_to_images_impl(
+    request: RenderDocumentToImagesRequest,
+    resource_dir: Option<PathBuf>,
+) -> Result<Vec<String>> {
     let source = PathBuf::from(&request.source_path);
     let temp_dir = tempfile::tempdir()?;
     let render_source = match extension(&source).as_str() {
@@ -248,37 +230,135 @@ fn render_document_to_images_impl(request: RenderDocumentToImagesRequest) -> Res
         other => anyhow::bail!("不支持的文档类型: {other}"),
     };
 
-    let pdfium = bind_pdfium()?;
-    let document = pdfium
-        .load_pdf_from_file(&render_source, None)
-        .context("无法渲染 PDF 文档")?;
     fs::create_dir_all(&request.output_directory)
         .with_context(|| format!("无法创建输出目录: {}", request.output_directory))?;
 
+    let pages = render_pdf_pages(
+        &render_source,
+        resource_dir.as_deref(),
+        &request.page_numbers,
+        &request.render_density,
+    )?;
     let mut output_paths = Vec::new();
     let stem = Path::new(&request.source_path)
         .file_stem()
         .and_then(|value| value.to_str())
         .unwrap_or("output");
 
-    let single_page = request.page_numbers.len() == 1;
-
-    for page_number in request.page_numbers {
-        let page_index = page_number.checked_sub(1).context("页码必须从 1 开始")? as u16;
-        let page = document.pages().get(page_index)?;
-        let bitmap = page.render_with_config(
-            &PdfRenderConfig::new().set_target_width(if request.render_density == "high" { 2480 } else { 1240 })
-        )?;
-        let image = DynamicImage::ImageRgb8(bitmap.as_image().to_rgb8());
-        let image = apply_color_mode(image, &request.color_mode);
+    for rendered_page in pages {
+        let page_number = rendered_page.page_number;
+        let image = apply_color_mode(rendered_page.image, &request.color_mode);
         let file_name = match request.naming_pattern.as_str() {
-            "source-name" if single_page => format!("{}.{}", stem, request.output_format),
-            _ => format!("{}_{:03}.{}", stem, page_number, request.output_format),
+            "source-name-date" => dated_name(stem, page_number, &request.output_format),
+            _ => indexed_name(stem, page_number, &request.output_format),
         };
         let output_path = Path::new(&request.output_directory).join(file_name);
-        write_dynamic_image(&output_path, image, &request.output_format, Some(90))?;
+        if output_path.exists() {
+            continue;
+        }
+        write_dynamic_image(&output_path, &image, &request.output_format, Some(90))?;
         output_paths.push(output_path.to_string_lossy().into_owned());
     }
 
     Ok(output_paths)
+}
+
+#[cfg(test)]
+mod tests {
+    use std::fs;
+
+    use image::{codecs::jpeg::JpegEncoder, ColorType, ImageBuffer, Rgb};
+    use tempfile::tempdir;
+
+    use super::{current_date_stamp, dated_name, render_document_to_images_impl, RenderDocumentToImagesRequest};
+
+    #[test]
+    fn dated_name_appends_index_suffix() {
+        assert_eq!(dated_name("demo", 2, "jpg"), format!("demo-{}-002.jpg", current_date_stamp()));
+    }
+
+    #[test]
+    fn render_document_to_images_rejects_missing_docx_runtime_with_clear_error() {
+        let dir = tempdir().unwrap();
+        let source = dir.path().join("demo.docx");
+        fs::write(&source, b"fake-docx").unwrap();
+
+        let error = render_document_to_images_impl(
+            RenderDocumentToImagesRequest {
+                source_path: source.to_string_lossy().into_owned(),
+                output_directory: dir.path().join("out").to_string_lossy().into_owned(),
+                output_format: "jpg".into(),
+                color_mode: "rgb".into(),
+                page_numbers: vec![1],
+                render_density: "standard".into(),
+                naming_pattern: "source-name-index".into(),
+            },
+            None,
+        )
+        .unwrap_err();
+
+        assert!(error.to_string().contains("DOCX_RENDERER_NOT_AVAILABLE") || error.to_string().contains("无法转换 Word 文档"));
+    }
+
+    #[test]
+    fn render_document_to_images_reports_attempted_pdfium_locations() {
+        let dir = tempdir().unwrap();
+        let source = dir.path().join("demo.pdf");
+        fs::write(&source, b"%PDF-1.4\n1 0 obj\n<<>>\nendobj\ntrailer\n<<>>\n%%EOF").unwrap();
+
+        let error = render_document_to_images_impl(
+            RenderDocumentToImagesRequest {
+                source_path: source.to_string_lossy().into_owned(),
+                output_directory: dir.path().join("out").to_string_lossy().into_owned(),
+                output_format: "jpg".into(),
+                color_mode: "rgb".into(),
+                page_numbers: vec![1],
+                render_density: "standard".into(),
+                naming_pattern: "source-name-index".into(),
+            },
+            None,
+        )
+        .unwrap_err();
+
+        let error = error.to_string();
+        assert!(error.contains("PDF_RENDERER_NOT_AVAILABLE"));
+        assert!(error.contains("尝试位置") || error.contains("attempted"));
+    }
+
+    #[test]
+    fn render_document_to_images_rejects_missing_pdf_runtime_with_clear_error() {
+        let dir = tempdir().unwrap();
+        let source = dir.path().join("demo.pdf");
+        fs::write(&source, b"%PDF-1.4\n1 0 obj\n<<>>\nendobj\ntrailer\n<<>>\n%%EOF").unwrap();
+
+        let error = render_document_to_images_impl(
+            RenderDocumentToImagesRequest {
+                source_path: source.to_string_lossy().into_owned(),
+                output_directory: dir.path().join("out").to_string_lossy().into_owned(),
+                output_format: "jpg".into(),
+                color_mode: "rgb".into(),
+                page_numbers: vec![1],
+                render_density: "standard".into(),
+                naming_pattern: "source-name-index".into(),
+            },
+            None,
+        )
+        .unwrap_err();
+
+        let error = error.to_string();
+        assert!(error.contains("PDF_RENDERER_NOT_AVAILABLE") || error.contains("无法渲染 PDF 文档"));
+    }
+
+    #[test]
+    fn can_encode_minimal_jpeg_for_conversion_tests() {
+        let image = ImageBuffer::<Rgb<u8>, _>::from_pixel(1, 1, Rgb([1, 2, 3]));
+        let mut bytes = Vec::new();
+        let mut writer = std::io::BufWriter::new(&mut bytes);
+        JpegEncoder::new_with_quality(&mut writer, 90)
+            .encode(image.as_raw(), 1, 1, ColorType::Rgb8.into())
+            .unwrap();
+        drop(writer);
+
+        assert!(!bytes.is_empty());
+    }
 }

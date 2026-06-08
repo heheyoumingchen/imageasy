@@ -1,11 +1,11 @@
 use std::{fs, path::PathBuf};
 
-use image::{GenericImageView, ImageBuffer, Rgb, Rgba};
+use image::{codecs::jpeg::JpegEncoder, ColorType, GenericImageView, ImageBuffer, Rgb, Rgba};
 use tempfile::tempdir;
 
-use image_batch_helper_lib::commands::conversion::{
-    convert_image_file, inspect_conversion_directory, inspect_conversion_file, render_document_to_images,
-    ConvertImageFileRequest, RenderDocumentToImagesRequest,
+use imageasy_lib::commands::conversion::{
+    convert_image_file, inspect_conversion_directory, inspect_conversion_file,
+    ConvertImageFileRequest,
 };
 
 #[test]
@@ -70,41 +70,34 @@ fn convert_image_file_writes_requested_format() {
 }
 
 #[test]
-fn render_document_to_images_rejects_missing_docx_runtime_with_clear_error() {
+fn convert_image_file_reencodes_jpeg_family_to_requested_jpg_name() {
     let dir = tempdir().unwrap();
-    let source = dir.path().join("demo.docx");
-    fs::write(&source, b"fake-docx").unwrap();
+    let source = dir.path().join("source.jpg");
+    let target = dir.path().join("out").join("result.png");
 
-    let error = render_document_to_images(RenderDocumentToImagesRequest {
+    let image = ImageBuffer::<Rgb<u8>, _>::from_pixel(10, 8, Rgb([50, 90, 130]));
+    let mut bytes = Vec::new();
+    let mut writer = std::io::BufWriter::new(&mut bytes);
+    JpegEncoder::new_with_quality(&mut writer, 90)
+        .encode(image.as_raw(), 10, 8, ColorType::Rgb8.into())
+        .unwrap();
+    drop(writer);
+    fs::write(&source, bytes).unwrap();
+
+    let output_paths = convert_image_file(ConvertImageFileRequest {
         source_path: source.to_string_lossy().into_owned(),
-        output_directory: dir.path().join("out").to_string_lossy().into_owned(),
+        output_path: target.to_string_lossy().into_owned(),
         output_format: "jpg".into(),
-        color_mode: "rgb".into(),
-        page_numbers: vec![1],
-        render_density: "standard".into(),
-        naming_pattern: "source-name-page".into(),
+        color_mode: "gray-cmyk".into(),
+        quality: Some(80),
     })
-    .unwrap_err();
+    .unwrap();
 
-    assert!(error.contains("DOCX_RENDERER_NOT_AVAILABLE") || error.contains("无法转换 Word 文档"));
+    let output_path = PathBuf::from(&output_paths[0]);
+    let output = image::open(&output_path).unwrap();
+
+    assert_eq!(output_path.file_name().unwrap().to_string_lossy(), "result.jpg");
+    assert_eq!(output.dimensions(), (10, 8));
 }
 
-#[test]
-fn render_document_to_images_rejects_missing_pdf_runtime_with_clear_error() {
-    let dir = tempdir().unwrap();
-    let source = dir.path().join("demo.pdf");
-    fs::write(&source, b"%PDF-1.4\n1 0 obj\n<<>>\nendobj\ntrailer\n<<>>\n%%EOF").unwrap();
 
-    let error = render_document_to_images(RenderDocumentToImagesRequest {
-        source_path: source.to_string_lossy().into_owned(),
-        output_directory: dir.path().join("out").to_string_lossy().into_owned(),
-        output_format: "jpg".into(),
-        color_mode: "rgb".into(),
-        page_numbers: vec![1],
-        render_density: "standard".into(),
-        naming_pattern: "source-name-page".into(),
-    })
-    .unwrap_err();
-
-    assert!(error.contains("PDF_RENDERER_NOT_AVAILABLE") || error.contains("无法渲染 PDF 文档"));
-}

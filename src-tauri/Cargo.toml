@@ -1,12 +1,12 @@
 [package]
-name = "image-batch-helper"
+name = "imageasy"
 version = "0.1.0"
 description = "图片批量处理助手"
-authors = ["Claude Code"]
+authors = ["heheyouchen"]
 edition = "2021"
 
 [lib]
-name = "image_batch_helper_lib"
+name = "imageasy_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]
@@ -15,12 +15,20 @@ tauri-build = { version = "2.0.0", features = [] }
 [dependencies]
 anyhow = "1"
 base64 = "0.22"
+chrono = { version = "0.4", default-features = true, features = ["clock"] }
 image = { version = "0.25", default-features = true, features = ["jpeg", "png", "webp", "bmp"] }
+jpeg-decoder = "0.3"
+lopdf = "0.35"
 pdfium-render = "0.8"
+scraper = "0.22"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tauri = { version = "2.0.0", features = [] }
 tauri-plugin-dialog = "2.0.0"
 tempfile = "3.15"
+ureq = "2"
+url = "2"
 walkdir = "2.5"
+rayon = "1.10"
+zip = { version = "2", default-features = false, features = ["deflate"] }
 [dev-dependencies]

@@ -1,243 +1,285 @@
-import { useState } from 'react';
-import { extractDocumentImages, inspectExtractionDocument } from '../services/extractionCommands';
-import { chooseOutputDirectory, openExtractionDocuments } from '../services/fileDialog';
-import type { ExtractionDocumentInfo, ExtractionOutputFormat } from '../types/extraction';
-
-type ExtractionItem = ExtractionDocumentInfo & {
-  status: 'ready' | 'running' | 'success' | 'failed';
-  extractedCount: number;
-  skippedCount: number;
-  outputPaths: string[];
-  errorMessage: string | null;
-};
-
-const sourceName = (path: string) => path.replace(/\\/g, '/').split('/').pop() ?? path;
-
-const fallbackDocumentInfo = (path: string): ExtractionDocumentInfo => ({
-  sourcePath: path,
-  sourceName: sourceName(path),
-  extension: sourceName(path).split('.').pop()?.toLowerCase() ?? '',
-  embeddedImageCount: 0,
-  pageCount: 0
-});
+import { useMemo } from 'react';
+import { useLanguage } from '../hooks/useLanguage';
+import { useExtractionWorkflow } from '../hooks/useExtractionWorkflow';
+import ConfirmDialog from '../components/feedback/ConfirmDialog';
+import BatchFooterBar from '../components/shared/BatchFooterBar';
+import ExtractionSettingsPanel from '../components/extraction/ExtractionSettingsPanel';
+import ExtractionItemList from '../components/extraction/ExtractionItemList';
+import ConversionBatchStatus from '../components/convert-image/ConversionBatchStatus';
+import { Plus, Play, Trash2 } from 'lucide-react';
 
 const ExtractImagePage = () => {
-  const [items, setItems] = useState<ExtractionItem[]>([]);
-  const [outputDirectory, setOutputDirectory] = useState('');
-  const [outputFormat, setOutputFormat] = useState<ExtractionOutputFormat>('png');
-  const [pageError, setPageError] = useState<string | null>(null);
-  const [isRunning, setIsRunning] = useState(false);
+  const {
+    items,
+    outputDirectory,
+    outputFormat,
+    colorMode,
+    namingPattern,
+    pageError,
+    isRunning,
+    failedDetailsOpen,
+    setFailedDetailsOpen,
+    stats,
+    failedItems,
+    importDocuments,
+    selectOutputDirectory,
+    openOutputDirectory,
+    handleOutputFormatChange,
+    handleColorModeChange,
+    handleNamingPatternChange,
+    retryFailed,
+    toggleItemSelected,
+    clearList,
+    startExtraction
+  } = useExtractionWorkflow();
+  const language = useLanguage();
 
-  const readyItems = items.filter((item) => item.status === 'ready');
-  const totalExpected = items.reduce((sum, item) => sum + item.embeddedImageCount, 0);
-  const totalExtracted = items.reduce((sum, item) => sum + item.extractedCount, 0);
-
-  const importDocuments = async () => {
-    setPageError(null);
-    const paths = await openExtractionDocuments();
-
-    for (const path of paths) {
-      try {
-        const documentInfo = await inspectExtractionDocument(path);
-        setItems((current) => [
-          ...current,
-          { ...documentInfo, status: 'ready', extractedCount: 0, skippedCount: 0, outputPaths: [], errorMessage: null }
-        ]);
-      } catch (error) {
-        const documentInfo = fallbackDocumentInfo(path);
-        setItems((current) => [
-          ...current,
-          {
-            ...documentInfo,
-            status: 'failed',
-            extractedCount: 0,
-            skippedCount: 0,
-            outputPaths: [],
-            errorMessage: error instanceof Error ? error.message : String(error)
+  const copy = useMemo(
+    () =>
+      language === 'en-US'
+        ? {
+            importDocuments: 'Import documents',
+            documentCount: (count: number) => `${count} documents`,
+            documentListLabel: 'File Name',
+            emptyDocuments: 'Supports Word, PDF, and PPT files. Drag a folder here to open it.',
+            pageUnit: 'pages',
+            estimatedImages: (count: number) => `Estimated ${count} images`,
+            statusDone: (count: number) => `Done ${count}`,
+            statusRunning: 'Extracting',
+            statusFailed: 'Failed',
+            statusReady: 'Ready',
+            outputSettings: {
+              panelTitle: 'Extraction settings',
+              outputDirectory: 'Output directory',
+              chooseDirectory: 'Choose path',
+              outputFormat: 'Output format',
+              colorMode: 'Color mode',
+              namingPattern: 'Naming pattern',
+              namingPatternIndexed: 'Source name - index',
+              namingPatternDate: 'Source name - date',
+              grayCmyk: 'Gray CMYK',
+            },
+            actions: {
+              startExtraction: 'Start extraction',
+              running: 'Extracting...',
+              openOutputDirectory: 'Open output directory',
+              retryFailedItems: 'Retry failed items',
+              toggleFailedDetails: 'Error details',
+              selectOutputDirectoryError: 'Please choose an output directory first',
+            },
+            batchStatus: {
+              totalLabel: 'Total',
+              successLabel: 'Success',
+              failedLabel: 'Failed',
+              runningLabel: 'Running',
+              progressTitle: 'Overall progress'
+            },
+            emptyFailedItems: 'No failed items.',
+            footer: {
+              regionLabel: 'Extraction task status bar',
+              currentTask: 'Current task',
+              queuedFiles: 'Queued files',
+              outputDirectory: 'Output directory',
+              completed: 'Completed',
+              failed: 'Failed',
+              version: 'Version',
+              currentTaskValue: 'Image extraction',
+              emptyOutputDirectory: '--',
+              versionValue: 'V1.0'
+            }
           }
-        ]);
-      }
-    }
-  };
+        : {
+            importDocuments: '添加文件',
+            documentCount: (count: number) => `${count} 个文档`,
+            documentListLabel: '文件列表',
+            emptyDocuments: '支持word、pdf、ppt文件，拖拽文件夹即可打开。',
+            pageUnit: '页',
+            estimatedImages: (count: number) => `预计 ${count} 张图片`,
+            statusDone: (count: number) => `完成 ${count} 张`,
+            statusRunning: '提取中',
+            statusFailed: '失败',
+            statusReady: '待处理',
+            outputSettings: {
+              panelTitle: '提取设置',
+              outputDirectory: '输出目录',
+              chooseDirectory: '选择路径',
+              outputFormat: '导出格式',
+              colorMode: '输出色彩模式',
+              namingPattern: '命名规则',
+              namingPatternIndexed: '原文件名-序号',
+              namingPatternDate: '原文件名-日期-序号',
+              grayCmyk: '灰度 CMYK',
+            },
+            actions: {
+              startExtraction: '开始提取',
+              running: '正在提取...',
+              openOutputDirectory: '打开输出目录',
+              retryFailedItems: '重试失败项',
+              toggleFailedDetails: '错误详情',
+              selectOutputDirectoryError: '请先选择输出目录',
+            },
+            batchStatus: {
+              totalLabel: '总数',
+              successLabel: '成功',
+              failedLabel: '失败',
+              runningLabel: '进行中',
+              progressTitle: '全局进度'
+            },
+            emptyFailedItems: '当前没有失败项。',
+            footer: {
+              regionLabel: '提取任务页状态栏',
+              currentTask: '当前任务',
+              queuedFiles: '队列文件',
+              outputDirectory: '输出目录',
+              completed: '已完成',
+              failed: '失败',
+              version: '版本号',
+              currentTaskValue: '图片提取',
+              emptyOutputDirectory: '--',
+              versionValue: 'V1.0'
+            }
+          },
+    [language]
+  );
 
-  const selectOutputDirectory = async () => {
-    const selected = await chooseOutputDirectory();
-
-    if (selected) {
-      setOutputDirectory(selected);
-    }
-  };
-
-  const startExtraction = async () => {
-    if (!outputDirectory) {
-      setPageError('请先选择输出目录');
-      return;
-    }
-
-    setPageError(null);
-    setIsRunning(true);
-
-    for (const item of readyItems) {
-      setItems((current) => current.map((entry) => (entry.sourcePath === item.sourcePath ? { ...entry, status: 'running' } : entry)));
-
-      try {
-        const result = await extractDocumentImages({
-          sourcePath: item.sourcePath,
-          outputDirectory,
-          outputFormat,
-          namingPattern: 'source-name-index'
-        });
-        setItems((current) =>
-          current.map((entry) =>
-            entry.sourcePath === item.sourcePath
-              ? {
-                  ...entry,
-                  status: 'success',
-                  extractedCount: result.extractedCount,
-                  skippedCount: result.skippedCount,
-                  outputPaths: result.outputPaths,
-                  errorMessage: null
-                }
-              : entry
-          )
-        );
-      } catch (error) {
-        setItems((current) =>
-          current.map((entry) =>
-            entry.sourcePath === item.sourcePath
-              ? { ...entry, status: 'failed', errorMessage: error instanceof Error ? error.message : String(error) }
-              : entry
-          )
-        );
-      }
-    }
-
-    setIsRunning(false);
-  };
+  const failedDetailsId = 'extraction-failed-details';
 
   return (
-    <section className="min-h-[calc(100vh-112px)] rounded-[28px] border border-[#ececf4] bg-[#f7f8fc] p-5 text-[#2f3440] shadow-[0_18px_60px_rgba(46,52,64,0.08)]">
-      <div className="flex items-start justify-between gap-5">
-        <div>
-          <div className="inline-flex rounded-full bg-[#ffe7f0] px-3 py-1 text-xs font-semibold text-[#ff5c93]">Extract</div>
-          <h1 className="mt-3 text-[28px] font-semibold tracking-[-0.02em] text-[#252a36]">图片提取</h1>
-          <p className="mt-2 text-sm text-[#848a98]">从 Word / PDF 文档中批量提取图片素材</p>
+    <div className="flex flex-col h-full p-5 overflow-hidden bg-bg-main animate-in fade-in duration-500">
+      {pageError ? (
+        <div className="mb-4 rounded border border-red-100 bg-red-50/50 px-6 py-4 text-sm text-red-600 flex items-center gap-3 animate-in slide-in-from-top-2">
+          <svg viewBox="0 0 20 20" fill="currentColor" className="w-5 h-5">
+            <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
+          </svg>
+          <span className="font-bold">{pageError}</span>
         </div>
-        <button
-          type="button"
-          onClick={importDocuments}
-          className="rounded-[18px] bg-[#ff6f9f] px-5 py-3 text-sm font-semibold text-white shadow-[0_14px_30px_rgba(255,111,159,0.26)]"
-        >
-          导入文档
-        </button>
-      </div>
+      ) : null}
 
-      <div className="mt-6 grid gap-5 xl:grid-cols-[1.3fr_0.9fr]">
-        <section className="rounded-[26px] border border-[#ececf4] bg-white p-5 shadow-[0_12px_30px_rgba(46,52,64,0.05)]">
-          <div className="flex items-center justify-between">
-            <h2 className="text-base font-semibold text-[#252a36]">文档导入区</h2>
-            <span className="rounded-full bg-[#f3f4f8] px-3 py-1 text-xs text-[#8a90a0]">{items.length} 个文档</span>
+      <div className="flex-1 grid grid-cols-1 xl:grid-cols-[1fr_380px] gap-4 min-h-0 overflow-hidden">
+        <div className="flex flex-col min-h-0 overflow-hidden">
+          <div className="flex items-center justify-between px-6 py-4 border-b border-border-light/60">
+             <h2 className="text-base font-bold text-[#1A1D23]">{copy.documentListLabel}</h2>
+             <div className="flex items-center gap-3">
+               <button
+                 onClick={importDocuments}
+                 className="flex h-10 items-center gap-2 px-4 rounded-lg bg-meitu text-white text-[13px] font-bold hover:brightness-110 active:scale-95 transition-all"
+               >
+                 <Plus size={16} />
+                 {copy.importDocuments}
+               </button>
+               <button
+                 onClick={clearList}
+                 className="flex h-10 items-center gap-2 px-4 rounded-lg border border-border-light bg-white text-[#515867] text-[13px] font-bold hover:text-meitu hover:border-meitu transition-all"
+               >
+                 <Trash2 size={16} />
+                 {language === 'en-US' ? 'Clear list' : '清空列表'}
+               </button>
+             </div>
           </div>
+          <div className="flex-1 overflow-hidden">
+            <ExtractionItemList
+              items={items}
+              copy={{
+                documentListLabel: copy.documentListLabel,
+                emptyDocuments: copy.emptyDocuments,
+                pageUnit: copy.pageUnit,
+                estimatedImages: copy.estimatedImages,
+                statusDone: copy.statusDone,
+                statusRunning: copy.statusRunning,
+                statusFailed: copy.statusFailed,
+                statusReady: copy.statusReady
+              }}
+              onToggleSelected={toggleItemSelected}
+            />
+          </div>
+        </div>
+
+        <aside className="flex flex-col gap-4 overflow-y-auto pr-1 custom-scrollbar">
+          <ExtractionSettingsPanel
+            copy={copy.outputSettings}
+            outputDirectory={outputDirectory}
+            outputFormat={outputFormat}
+            colorMode={colorMode}
+            namingPattern={namingPattern}
+            onOutputDirectoryChange={selectOutputDirectory}
+            onOutputFormatChange={handleOutputFormatChange}
+            onColorModeChange={handleColorModeChange}
+            onNamingPatternChange={handleNamingPatternChange}
+          />
 
           <button
             type="button"
-            onClick={importDocuments}
-            className="mt-4 flex min-h-[170px] w-full flex-col items-center justify-center rounded-[24px] border border-dashed border-[#ffd0df] bg-[#fff6fa] px-6 text-center"
+            className="w-full h-10 rounded-lg bg-meitu text-white font-bold text-sm transition-all hover:scale-[1.01] active:scale-[0.98] disabled:opacity-50 disabled:scale-100 flex items-center justify-center gap-2"
+            onClick={() => startExtraction(copy.actions.selectOutputDirectoryError)}
+            disabled={isRunning || items.filter(i => i.status === 'ready' && i.selected).length === 0}
           >
-            <span className="flex h-14 w-14 items-center justify-center rounded-[20px] bg-white text-xl text-[#ff6f9f] shadow-[0_10px_24px_rgba(255,111,159,0.14)]">+</span>
-            <span className="mt-4 text-base font-semibold text-[#343a46]">拖拽或点击导入文档</span>
-            <span className="mt-2 text-sm text-[#9aa0ad]">支持 DOCX、PDF，自动统计可提取图片</span>
-          </button>
-
-          <div role="region" aria-label="待提取文档" className="mt-5 grid gap-3">
-            {items.length === 0 ? (
-              <div className="rounded-[20px] border border-[#eef0f5] bg-[#fbfcfe] px-4 py-5 text-sm text-[#9aa0ad]">
-                暂无文档，导入后将在这里显示文件和图片数量。
-              </div>
+            {isRunning ? (
+              <div className="h-6 w-6 animate-spin rounded-full border-3 border-white border-t-transparent" />
             ) : (
-              items.map((item) => (
-                <article key={item.sourcePath} className="flex items-center justify-between gap-4 rounded-[20px] border border-[#eef0f5] bg-[#fbfcfe] p-4">
-                  <div className="min-w-0">
-                    <h3 className="truncate text-sm font-semibold text-[#343a46]">{item.sourceName}</h3>
-                    <p className="mt-1 text-xs text-[#9aa0ad]">
-                      {item.extension.toUpperCase()} · {item.pageCount || '-'} 页
-                    </p>
-                    <p className="mt-1 text-xs text-[#9aa0ad]">预计 {item.embeddedImageCount} 张图片</p>
-                    {item.errorMessage ? <p className="mt-1 text-xs text-[#ff5c7f]">{item.errorMessage}</p> : null}
-                  </div>
-                  <span className="rounded-full bg-[#effaf5] px-3 py-1 text-xs font-medium text-[#34a36f]">
-                    {item.status === 'success' ? `完成 ${item.extractedCount} 张` : item.status === 'running' ? '提取中' : item.status === 'failed' ? '失败' : '待处理'}
-                  </span>
-                </article>
-              ))
+              <Play size={24} fill="currentColor" />
             )}
-          </div>
-        </section>
-
-        <div className="grid gap-5">
-          <section className="rounded-[26px] border border-[#ececf4] bg-white p-5 shadow-[0_12px_30px_rgba(46,52,64,0.05)]">
-            <h2 className="text-base font-semibold text-[#252a36]">输出设置</h2>
-            <div className="mt-4 grid gap-4">
-              <label className="text-sm font-medium text-[#5b6270]">
-                导出格式
-                <select
-                  value={outputFormat}
-                  onChange={(event) => setOutputFormat(event.target.value as ExtractionOutputFormat)}
-                  className="mt-2 w-full rounded-[16px] border border-[#e6e8f0] bg-[#fbfcfe] px-3 py-2.5 text-sm text-[#343a46] outline-none"
-                >
-                  <option value="png">PNG</option>
-                  <option value="jpg">JPG</option>
-                </select>
-              </label>
-
-              <div>
-                <div className="text-sm font-medium text-[#5b6270]">输出目录</div>
-                <button
-                  type="button"
-                  onClick={selectOutputDirectory}
-                  className="mt-2 w-full rounded-[16px] border border-[#e6e8f0] bg-[#fbfcfe] px-3 py-2.5 text-left text-sm text-[#343a46]"
-                >
-                  {outputDirectory || '选择目录'}
-                </button>
-              </div>
-
-              <button
-                type="button"
-                disabled={isRunning || readyItems.length === 0}
-                onClick={startExtraction}
-                className="rounded-[18px] bg-[#6f7dff] px-4 py-3 text-sm font-semibold text-white shadow-[0_14px_30px_rgba(111,125,255,0.22)] disabled:cursor-not-allowed disabled:bg-[#c9cde2] disabled:shadow-none"
-              >
-                开始提取
-              </button>
-              {pageError ? <p className="text-sm text-[#ff5c7f]">{pageError}</p> : null}
-            </div>
-          </section>
-
-          <section className="rounded-[26px] border border-[#ececf4] bg-white p-5 shadow-[0_12px_30px_rgba(46,52,64,0.05)]">
-            <h2 className="text-base font-semibold text-[#252a36]">提取结果</h2>
-            <div className="mt-4 grid grid-cols-2 gap-3">
-              <div className="rounded-[20px] bg-[#f7f8fc] p-4">
-                <div className="text-2xl font-semibold text-[#252a36]">{totalExpected}</div>
-                <div className="mt-1 text-xs text-[#9aa0ad]">预计图片</div>
-              </div>
-              <div className="rounded-[20px] bg-[#f7f8fc] p-4">
-                <div className="text-2xl font-semibold text-[#252a36]">{totalExtracted}</div>
-                <div className="mt-1 text-xs text-[#9aa0ad]">已完成</div>
-              </div>
-            </div>
-            <div className="mt-4 grid gap-2">
-              {items.filter((item) => item.status === 'success').map((item) => (
-                <div key={item.sourcePath} className="rounded-[16px] bg-[#f8fff9] px-3 py-2 text-sm text-[#34a36f]">
-                  <span>已提取 {item.extractedCount} 张</span>
-                  <span className="ml-2">跳过 {item.skippedCount} 张</span>
-                </div>
-              ))}
-              {items.some((item) => item.status === 'success') ? null : <p className="text-sm text-[#9aa0ad]">完成提取后将在这里汇总输出结果。</p>}
-            </div>
-          </section>
-        </div>
+            {isRunning ? copy.actions.running : copy.actions.startExtraction}
+          </button>
+        </aside>
       </div>
-    </section>
+
+      <div className="mt-4 pt-4 border-t border-border-light/60">
+        <ConversionBatchStatus
+          copy={{
+            ...copy.batchStatus,
+            openOutputDirectory: copy.actions.openOutputDirectory,
+            toggleFailedDetails: copy.actions.toggleFailedDetails,
+            retryFailedItems: copy.actions.retryFailedItems
+          }}
+          total={stats.total}
+          running={stats.running}
+          success={stats.success}
+          failed={stats.failed}
+          onOpenOutputDirectory={openOutputDirectory}
+          onRetryFailed={retryFailed}
+          onToggleDetails={() => setFailedDetailsOpen((current) => !current)}
+          canOpenOutputDirectory={Boolean(outputDirectory)}
+          canRetryFailed={stats.failed > 0}
+          failedDetailsOpen={failedDetailsOpen}
+          failedDetailsAriaControls={failedDetailsId}
+        />
+        <ConfirmDialog
+          open={failedDetailsOpen}
+          title={copy.actions.toggleFailedDetails}
+          confirmLabel={language === 'en-US' ? 'Close' : '关闭'}
+          onConfirm={() => setFailedDetailsOpen(false)}
+        >
+          {failedItems.length > 0 ? (
+            <ul className="mt-4 max-h-[360px] space-y-3 overflow-y-auto pr-1 text-sm text-[#515867] custom-scrollbar">
+              {failedItems.map((item) => (
+                <li key={item.sourcePath} className="rounded-lg bg-slate-800/70 px-3 py-2">
+                  <p className="font-semibold text-[#1A1D23]">{item.sourceName}</p>
+                  <p className="mt-1 break-words text-[#515867]">{item.errorMessage ?? copy.emptyFailedItems}</p>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="mt-3 text-sm text-[#515867]">{copy.emptyFailedItems}</p>
+          )}
+        </ConfirmDialog>
+      </div>
+
+      <BatchFooterBar
+        regionLabel={copy.footer.regionLabel}
+        currentTaskLabel={copy.footer.currentTask}
+        queuedFilesLabel={copy.footer.queuedFiles}
+        outputDirectoryLabel={copy.footer.outputDirectory}
+        completedLabel={copy.footer.completed}
+        failedLabel={copy.footer.failed}
+        versionLabel={copy.footer.version}
+        currentTaskValue={copy.footer.currentTaskValue}
+        queuedFilesValue={stats.total}
+        outputDirectoryValue={outputDirectory || copy.footer.emptyOutputDirectory}
+        completedValue={stats.success}
+        failedValue={stats.failed}
+        versionValue={copy.footer.versionValue}
+      />
+    </div>
   );
 };
 

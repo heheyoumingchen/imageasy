@@ -1,21 +1,108 @@
 @import "tailwindcss";
 
+@theme {
+  --color-meitu: #FF2D6C;
+  --color-meitu-light: #FFF3F7;
+  --color-bg-main: #F8F9FB;
+  --color-border-light: #ECECF2;
+  --radius-xl: 10px;
+  --radius-2xl: 14px;
+  --radius-3xl: 20px;
+}
+
 :root {
-  color-scheme: dark;
-  font-family: "Microsoft YaHei", "PingFang SC", "Segoe UI", sans-serif;
-  background-color: #020617;
-  color: #e2e8f0;
+  font-family: "PingFang SC", "Microsoft YaHei", "Inter", system-ui, sans-serif;
+  background-color: var(--color-bg-main);
+  color: #2F3440;
+}
+
+[data-theme='dark'] {
+  --color-bg-main: #121212;
+  --color-border-light: #2E2E2E;
+  --color-meitu-light: rgba(255, 45, 108, 0.14);
+  color: #E6E6E6;
+}
+
+[data-theme='dark'] .bg-white,
+[data-theme='dark'] .bg-white\/88 {
+  background-color: #1E1E1E;
+}
+
+[data-theme='dark'] .bg-\[\#FAFBFD\],
+[data-theme='dark'] .bg-\[\#FBFCFE\],
+[data-theme='dark'] .bg-\[\#FAFBFD\]\/50,
+[data-theme='dark'] .bg-\[\#F4F6FB\],
+[data-theme='dark'] .bg-\[\#F8F9FB\] {
+  background-color: #121212;
+}
+
+[data-theme='dark'] .text-\[\#1A1D23\],
+[data-theme='dark'] .text-\[\#2F3440\],
+[data-theme='dark'] .text-\[\#343A46\],
+[data-theme='dark'] .text-\[\#313744\] {
+  color: #E6E6E6;
+}
+
+[data-theme='dark'] .text-\[\#515867\],
+[data-theme='dark'] .text-\[\#5D6472\],
+[data-theme='dark'] .text-\[\#616877\],
+[data-theme='dark'] .text-\[\#656B78\] {
+  color: #9E9E9E;
+}
+
+[data-theme='dark'] .text-\[\#8D93A1\],
+[data-theme='dark'] .text-\[\#98A0AF\],
+[data-theme='dark'] .text-\[\#717887\],
+[data-theme='dark'] .text-\[\#6B7280\] {
+  color: #9E9E9E;
+}
+
+[data-theme='dark'] .border-border-light {
+  border-color: #2E2E2E;
+}
+
+[data-theme='dark'] .border-gray-200,
+[data-theme='dark'] .border-gray-100 {
+  border-color: #2E2E2E;
+}
+
+[data-theme='dark'] .bg-gray-50,
+[data-theme='dark'] .bg-gray-100 {
+  background-color: #121212;
+}
+
+[data-theme='dark'] .bg-gray-700 {
+  background-color: #333333;
+}
+
+[data-theme='dark'] .shadow-\[0_2px_10px_rgba\(0\,0\,0\,0\.02\)\],
+[data-theme='dark'] .shadow-\[0_4px_20px_rgba\(0\,0\,0\,0\.02\)\] {
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.3);
+}
+
+[data-theme='dark'] .hover\:bg-\[\#F8F9FB\]:hover {
+  background-color: #2A2A2A;
+}
+
+[data-theme='dark'] .hover\:bg-bg-main:hover {
+  background-color: #2A2A2A;
+}
+
+[data-theme='dark'] .logo-center-dot {
+  display: none;
 }
 
 body {
   margin: 0;
-  min-width: 320px;
+  min-width: 960px;
   min-height: 100vh;
-  background-color: #020617;
+  background-color: var(--color-bg-main);
+  overflow: hidden;
 }
 
 * {
   box-sizing: border-box;
+  transition: background-color 0.3s ease, color 0.3s ease, border-color 0.3s ease;
 }
 
 button,
@@ -23,4 +110,41 @@ input,
 select,
 textarea {
   font: inherit;
+}
+
+input[type="range"] {
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+input[type="range"]::-webkit-slider-runnable-track {
+  height: 6px;
+  border-radius: 9999px;
+  background: transparent;
+}
+
+input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--color-meitu);
+  margin-top: -4px;
+  cursor: pointer;
+}
+
+input[type="range"]::-moz-range-track {
+  height: 6px;
+  border-radius: 9999px;
+  background: transparent;
+}
+
+input[type="range"]::-moz-range-thumb {
+  width: 14px;
+  height: 14px;
+  border: none;
+  border-radius: 50%;
+  background: var(--color-meitu);
+  cursor: pointer;
 }

@@ -1,97 +1,223 @@
-import { useEffect, useMemo, useState } from 'react';
-import { createSettingsStore, type OutputDirectoryStrategy } from '../stores/settingsStore';
+import { useEffect, useState } from 'react';
+import { AboutCard, CacheCard, GeneralSettingsCard } from '../components/settings';
+import ConfirmDialog from '../components/feedback/ConfirmDialog';
+import { getSettingsStore } from '../hooks/useSettingsStore';
+import { clearAppCache, getAppCacheUsage } from '../services/cacheCommands';
+import type { CacheUsageResult } from '../types/cache';
+import type { PersistedSettings } from '../stores/settingsStore';
+
+const buildFormState = (draft: PersistedSettings | null, settings: PersistedSettings): PersistedSettings => draft ?? settings;
+
+const hasSettingsDraftChanged = (draft: PersistedSettings | null, savedSnapshot: PersistedSettings | null) =>
+  draft !== null && savedSnapshot !== null && JSON.stringify(draft) !== JSON.stringify(savedSnapshot);
+
+const formatCacheBytes = (bytes: number) => {
+  if (bytes < 1024) {
+    return `${bytes} B`;
+  }
+
+  const mb = bytes / 1024 / 1024;
+  return `${mb.toFixed(mb >= 10 ? 0 : 1)} MB`;
+};
+
+const CONTACT_EMAIL = 'heheyouchen@outlook.com';
 
 const SettingsPage = () => {
-  const settingsStore = useMemo(() => createSettingsStore(), []);
+  const settingsStore = getSettingsStore();
   const [, setVersion] = useState(0);
   const state = settingsStore.getState();
+  const [draft, setDraft] = useState<PersistedSettings | null>(null);
+  const [savedSnapshot, setSavedSnapshot] = useState<PersistedSettings | null>(null);
+  const [cacheUsage, setCacheUsage] = useState<CacheUsageResult | null>(null);
+  const [isClearingCache, setIsClearingCache] = useState(false);
+  const [isContactDialogOpen, setIsContactDialogOpen] = useState(false);
 
   const sync = () => {
     setVersion((value) => value + 1);
   };
 
   useEffect(() => {
-    void settingsStore.getState().load().finally(sync);
+    void settingsStore
+      .getState()
+      .load()
+      .then((settings) => {
+        if (!settings) {
+          return;
+        }
+
+        setDraft(settings);
+        setSavedSnapshot(settings);
+      })
+      .finally(sync);
   }, [settingsStore]);
 
+  useEffect(() => {
+    void getAppCacheUsage().then(setCacheUsage).catch(() => setCacheUsage(null));
+  }, []);
+
+  const formState = buildFormState(draft, {
+    theme: state.theme,
+    language: state.language,
+    maxConcurrency: state.maxConcurrency,
+    outputDirectoryStrategy: state.outputDirectoryStrategy,
+    rememberLastParams: state.rememberLastParams
+  });
+  const isDirty = hasSettingsDraftChanged(draft, savedSnapshot);
+  const isEnglish = formState.language === 'en-US';
+
+  const copy = isEnglish
+    ? {
+        reset: 'Restore Defaults',
+        save: 'Save Changes',
+        general: 'Interface & Task',
+        theme: 'App Theme',
+        themeDark: 'Dark',
+        themeLight: 'Light',
+        language: 'Language',
+        maxConcurrency: 'Max Concurrent Tasks',
+        outputDirectoryStrategy: 'Default Output Strategy',
+        sameAsSource: 'Same as source folder',
+        custom: 'Manual selection',
+        editor: 'Editing Preferences',
+        rememberLastParams: 'Retain parameters on switch',
+        aboutApp: 'About',
+        appName: 'imageasy',
+        appVersion: 'v1.0.0',
+        cacheTitle: 'Cache',
+        cacheDescription: 'Clear download thumbnail cache and image editor temporary files without affecting system caches.',
+        cacheSizeLabel: 'Cache Usage',
+        cleanCache: 'Clear Cache',
+        loading: 'Loading',
+        checkForUpdates: 'Check for Updates',
+        contact: 'Contact',
+        close: 'Close',
+      }
+    : {
+        reset: '恢复默认设置',
+        save: '保存设置',
+        general: '界面与任务设置',
+        theme: '界面主题',
+        themeDark: '深色模式',
+        themeLight: '浅色模式',
+        language: '语言设置',
+        maxConcurrency: '最大并发任务数',
+        outputDirectoryStrategy: '默认输出目录策略',
+        sameAsSource: '与源文件同目录',
+        custom: '每次手动选择',
+        editor: '图片编辑偏好',
+        rememberLastParams: '切换图片时保留调整参数',
+        aboutApp: '关于软件',
+        appName: 'imageasy',
+        appVersion: 'v1.0.0',
+        cacheTitle: '缓存',
+        cacheDescription: '清理图片下载缩略图缓存和图片编辑临时文件，不影响系统缓存。',
+        cacheSizeLabel: '缓存占用',
+        cleanCache: '清理缓存',
+        loading: '同步中',
+        checkForUpdates: '检查新版本（Check for Updates）',
+        contact: '联系方式',
+        close: '关闭',
+      };
+
+  const updateDraft = (partial: Partial<PersistedSettings>) => {
+    setDraft((current) => ({
+      ...(current ?? formState),
+      ...partial
+    }));
+    if (partial.theme) {
+      settingsStore.setState({ theme: partial.theme });
+    }
+    if (partial.language) {
+      settingsStore.setState({ language: partial.language });
+    }
+  };
+
+  const handleSave = async () => {
+    if (!draft) {
+      return;
+    }
+
+    const saved = await settingsStore.getState().updateSettings(draft);
+    if (!saved) {
+      sync();
+      return;
+    }
+
+    setDraft(saved);
+    setSavedSnapshot(saved);
+    sync();
+  };
+
+  const handleReset = () => {
+    if (!savedSnapshot) {
+      return;
+    }
+
+    setDraft(savedSnapshot);
+  };
+
+  const handleClearCache = async () => {
+    setIsClearingCache(true);
+    try {
+      const result = await clearAppCache();
+      setCacheUsage(result);
+    } finally {
+      setIsClearingCache(false);
+    }
+  };
+
+  const cacheSizeText = formatCacheBytes(cacheUsage?.totalBytes ?? 0);
+
   return (
-    <section className="max-w-5xl rounded-3xl border border-slate-800 bg-slate-900/70 p-6">
-      <div className="max-w-3xl">
-        <div className="inline-flex rounded-full border border-slate-800 bg-slate-950/80 px-3 py-1 text-xs text-slate-400">
-          应用偏好
-        </div>
-        <h3 className="mt-4 text-2xl font-semibold text-slate-50">设置中心</h3>
-        <p className="mt-3 text-sm leading-6 text-slate-400">
-          管理全局默认值、图片编辑偏好和批量任务执行方式。
-        </p>
+    <div data-testid="settings-page-shell" className="flex flex-col h-full p-5 overflow-hidden bg-bg-main">
+      <div className="flex-1 space-y-5 min-h-0 overflow-y-auto pr-2 custom-scrollbar">
+        <AboutCard copy={copy} onOpenContact={() => setIsContactDialogOpen(true)} />
+        <GeneralSettingsCard
+          copy={copy}
+          formState={formState}
+          isLoading={state.isLoading}
+          onThemeChange={(theme) => updateDraft({ theme })}
+          onLanguageChange={(language) => updateDraft({ language })}
+          onMaxConcurrencyChange={(maxConcurrency) => updateDraft({ maxConcurrency })}
+          onOutputDirectoryStrategyChange={(outputDirectoryStrategy) => updateDraft({ outputDirectoryStrategy })}
+          rememberLastParams={formState.rememberLastParams}
+          onToggleRemember={() => updateDraft({ rememberLastParams: !formState.rememberLastParams })}
+        />
+        <CacheCard copy={copy} cacheSizeText={cacheSizeText} isLoading={isClearingCache} onClear={handleClearCache} />
       </div>
 
-      <div className="mt-6 grid gap-4 lg:grid-cols-3">
-        <section className="rounded-2xl border border-slate-800 bg-slate-950/60 p-4 lg:col-span-2">
-          <h4 className="text-base font-semibold text-slate-100">常规设置</h4>
-          <div className="mt-4 grid gap-4">
-            <label className="text-sm text-slate-300">
-              最大并发任务数
-              <input
-                className="mt-2 w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-slate-100"
-                type="number"
-                min="1"
-                max="8"
-                value={state.maxConcurrency}
-                onChange={(event) => {
-                  void settingsStore.getState().updateSettings({
-                    maxConcurrency: Number(event.target.value)
-                  }).finally(sync);
-                }}
-              />
-            </label>
+      <div data-testid="settings-actions-footer" className="mt-6 flex justify-end gap-4 border-t border-border-light/60 pt-6">
+        <button
+          type="button"
+          className="h-10 px-6 rounded border border-border-light bg-white text-sm font-bold text-[#515867] transition-all hover:border-meitu hover:text-meitu active:scale-95 disabled:opacity-40"
+          disabled={!isDirty || state.isLoading}
+          onClick={handleReset}
+        >
+          {copy.reset}
+        </button>
+        <button
+          type="button"
+          className="h-10 px-10 rounded bg-meitu text-sm font-bold text-white transition-all hover:brightness-110 active:scale-95 disabled:opacity-40 disabled:shadow-none"
+          disabled={!isDirty || state.isLoading}
+          onClick={handleSave}
+        >
+          {copy.save}
+        </button>
+      </div>
 
-            <label className="text-sm text-slate-300">
-              默认输出目录策略
-              <select
-                className="mt-2 w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-slate-100"
-                value={state.outputDirectoryStrategy}
-                onChange={(event) => {
-                  void settingsStore.getState().updateSettings({
-                    outputDirectoryStrategy: event.target.value as OutputDirectoryStrategy
-                  }).finally(sync);
-                }}
-              >
-                <option value="same-as-source">与源文件同目录</option>
-                <option value="custom">每次手动选择</option>
-              </select>
-            </label>
+      <ConfirmDialog open={isContactDialogOpen} title={copy.contact} confirmLabel={copy.close} onConfirm={() => setIsContactDialogOpen(false)}>
+        <p className="mt-4 text-sm text-[#515867]">{CONTACT_EMAIL}</p>
+      </ConfirmDialog>
+
+      {state.isLoading && (
+        <div className="fixed inset-0 bg-white/40 backdrop-blur-md flex items-center justify-center z-50 animate-in fade-in duration-300">
+          <div className="bg-white/80 border border-white rounded p-8 flex flex-col items-center gap-4">
+            <div className="h-10 w-10 animate-spin rounded-full border-4 border-meitu/20 border-t-meitu" />
+            <span className="text-xs font-bold text-meitu uppercase tracking-widest">{copy.loading}</span>
           </div>
-        </section>
-
-        <div className="grid gap-4">
-          <section className="rounded-2xl border border-slate-800 bg-slate-950/60 p-4">
-            <h4 className="text-base font-semibold text-slate-100">图片编辑</h4>
-            <label className="mt-4 flex items-center gap-3 text-sm text-slate-300">
-              <input
-                type="checkbox"
-                checked={state.rememberLastParams}
-                onChange={(event) => {
-                  void settingsStore.getState().updateSettings({
-                    rememberLastParams: event.target.checked
-                  }).finally(sync);
-                }}
-              />
-              记住上次参数
-            </label>
-          </section>
-
-          <section className="rounded-2xl border border-slate-800 bg-slate-950/60 p-4">
-            <h4 className="text-base font-semibold text-slate-100">批量任务</h4>
-            <p className="mt-3 text-sm leading-6 text-slate-400">
-              批量转换和图片提取将使用当前并发与输出目录策略。
-            </p>
-          </section>
         </div>
-      </div>
-
-      {state.errorMessage ? <p className="mt-4 text-sm text-rose-300">{state.errorMessage}</p> : null}
-    </section>
+      )}
+    </div>
   );
 };
 

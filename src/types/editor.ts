@@ -1,5 +1,19 @@
-export type AdjustmentKey = 'brightness' | 'contrast' | 'saturation' | 'sharpen' | 'clarity' | 'quality';
-export type FilterType = 'none' | 'grayscale' | 'warm' | 'cool' | 'vintage';
+export type AdjustmentKey = 'brightness' | 'contrast' | 'saturation' | 'temperature' | 'tint' | 'sharpen' | 'clarity' | 'quality';
+export type FilterType =
+  | 'none'
+  | 'grayscale'
+  | 'warm'
+  | 'cool'
+  | 'vintage'
+  | 'sepia'
+  | 'vivid'
+  | 'fade'
+  | 'cinematic'
+  | 'noir'
+  | 'polaroid'
+  | 'dreamy'
+  | 'summer'
+  | 'forest';
 export type Rotation = 0 | 90 | 180 | 270;
 
 export type CropRect = {
@@ -13,6 +27,8 @@ export type AdjustmentParams = {
   brightness: number;
   contrast: number;
   saturation: number;
+  temperature: number;
+  tint: number;
   sharpen: number;
   clarity: number;
   quality: number;
@@ -31,13 +47,23 @@ export type EditorImageSummary = {
   sizeBytes: number;
 };
 
+export type WorkingImageSummary = EditorImageSummary;
+
 export type EditorDirectoryImage = EditorImageSummary & {
   index: number;
   thumbnailDataUrl: string;
 };
 
+export type EditorSnapshot = {
+  originalImage: EditorImageSummary | null;
+  currentImage: WorkingImageSummary | null;
+  currentIndex: number;
+  adjustments: AdjustmentParams;
+  hasUnsavedChanges: boolean;
+};
+
 export type OpenImageSessionResult = {
-  currentImage: EditorImageSummary;
+  currentImage: WorkingImageSummary;
   directoryImages: EditorDirectoryImage[];
   currentIndex: number;
 };
@@ -67,27 +93,31 @@ export type SaveImageAsJpgResult = {
   sizeBytes: number;
 };
 
+export type CommitCropRequest = {
+  sourcePath: string;
+  rotation: Rotation;
+  crop: CropRect;
+};
+
+export type CommitCropResult = {
+  workingImage: WorkingImageSummary;
+};
+
 export type PendingSwitchTarget = {
   index: number;
   reason: 'thumbnail' | 'previous' | 'next';
 };
 
-export type EditorSessionState = {
-  currentImage: EditorImageSummary | null;
-  directoryImages: EditorDirectoryImage[];
-  currentIndex: number;
-  adjustments: AdjustmentParams;
-  hasUnsavedChanges: boolean;
-  pendingSwitchTarget: PendingSwitchTarget | null;
-};
 
 export const defaultAdjustmentParams: AdjustmentParams = {
   brightness: 0,
   contrast: 0,
   saturation: 0,
+  temperature: 0,
+  tint: 0,
   sharpen: 0,
   clarity: 0,
-  quality: 90,
+  quality: 100,
   filterType: 'none',
   filterIntensity: 0,
   rotation: 0,

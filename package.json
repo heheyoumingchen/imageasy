@@ -1,5 +1,5 @@
 {
-  "name": "image-batch-helper",
+  "name": "imageasy",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -11,14 +11,15 @@
     "test:watch": "vitest",
     "stage:pdfium": "node scripts/stage-pdfium.mjs",
     "tauri:dev": "tauri dev",
-    "tauri:build": "pnpm stage:pdfium && tauri build"
+    "tauri:build": "pnpm stage:pdfium && tauri build",
+    "tauri:portable": "pnpm tauri:build && node scripts/bundle-portable.mjs"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.0.0",
     "@tauri-apps/plugin-dialog": "^2.0.0",
+    "lucide-react": "^1.14.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
-    "react-router-dom": "^7.0.0",
     "zustand": "^5.0.0"
   },
   "devDependencies": {

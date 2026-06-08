@@ -2,7 +2,7 @@ use std::fs;
 
 use tempfile::tempdir;
 
-use image_batch_helper_lib::commands::settings::{load_settings_from_path, save_settings_to_path, PersistedSettings};
+use imageasy_lib::commands::settings::{load_settings_from_path, save_settings_to_path, PersistedSettings};
 
 #[test]
 fn load_settings_from_path_returns_defaults_when_file_is_missing() {
@@ -36,3 +36,4 @@ fn save_settings_to_path_persists_and_loads_settings_json() {
     assert!(loaded.remember_last_params);
     assert!(fs::read_to_string(path).unwrap().contains("maxConcurrency"));
 }
+

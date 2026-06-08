@@ -1,16 +1,19 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { CropRect, EditorImageSummary, AdjustmentParams } from '../../types/editor';
+import { cropToOverlayRect, getDisplayedImageRect, pointerDeltaToImageDelta } from '../../utils/editorCropLayout';
 
 type ImagePreviewCanvasProps = {
   image: EditorImageSummary | null;
   adjustments: AdjustmentParams;
   previewUrl: string | null;
   isLoading: boolean;
+  isCropCommitting?: boolean;
+  isEnglish?: boolean;
   error: string | null;
   scale: number;
   isCropping: boolean;
   onCroppingChange: (value: boolean) => void;
-  onApplyCrop: (crop: CropRect | null) => void;
+  onApplyCrop: (crop: CropRect | null) => void | Promise<void>;
 };
 
 type CropInteraction =
@@ -67,6 +70,8 @@ const ImagePreviewCanvas = ({
   adjustments,
   previewUrl,
   isLoading,
+  isCropCommitting = false,
+  isEnglish = false,
   error,
   scale,
   isCropping,
@@ -75,8 +80,11 @@ const ImagePreviewCanvas = ({
 }: ImagePreviewCanvasProps) => {
   const [offset, setOffset] = useState({ x: 0, y: 0 });
   const [draftCrop, setDraftCrop] = useState<CropRect | null>(adjustments.crop);
+  const [viewportSize, setViewportSize] = useState({ width: 0, height: 0 });
   const dragOriginRef = useRef<{ x: number; y: number } | null>(null);
   const cropInteractionRef = useRef<CropInteraction | null>(null);
+  const viewportRef = useRef<HTMLDivElement | null>(null);
+  const previewImageRef = useRef<HTMLImageElement | null>(null);
 
   useEffect(() => {
     setOffset({ x: 0, y: 0 });
@@ -84,6 +92,67 @@ const ImagePreviewCanvas = ({
     dragOriginRef.current = null;
     cropInteractionRef.current = null;
   }, [previewUrl, adjustments.crop, isCropping, image]);
+
+  useEffect(() => {
+    const measure = () => {
+      const rect = viewportRef.current?.getBoundingClientRect();
+      if (!rect) {
+        return;
+      }
+
+      setViewportSize({
+        width: rect.width || viewportRef.current?.clientWidth || 760,
+        height: rect.height || viewportRef.current?.clientHeight || 560
+      });
+    };
+
+    measure();
+    window.addEventListener('resize', measure);
+    return () => window.removeEventListener('resize', measure);
+  }, [previewUrl, scale, image]);
+
+  const copy = isEnglish
+    ? {
+        previewFailed: 'Preview generation failed',
+        cropArea: 'Crop area',
+        resizeSouthEast: 'Resize crop bottom right corner',
+        waitingTitle: image ? image.name : 'Waiting for a local image',
+        waitingDescription: 'Open an image and the live preview will appear here.',
+        confirmCrop: 'Apply crop',
+        cancelCrop: 'Cancel crop',
+        updatingPreview: 'Updating preview...'
+      }
+    : {
+        previewFailed: '预览生成失败',
+        cropArea: '裁剪区域',
+        resizeSouthEast: '调整裁剪右下角',
+        waitingTitle: image ? image.name : '等待打开本地图片',
+        waitingDescription: '打开图片后，这里会显示真实预览。',
+        confirmCrop: '确认裁剪',
+        cancelCrop: '取消裁剪',
+        updatingPreview: '正在更新预览...'
+      };
+
+  const displayedRect = useMemo(() => {
+    if (!image || viewportSize.width === 0 || viewportSize.height === 0) {
+      return null;
+    }
+
+    return getDisplayedImageRect({
+      viewportWidth: viewportSize.width,
+      viewportHeight: viewportSize.height,
+      imageWidth: image.width,
+      imageHeight: image.height,
+      scale,
+      offsetX: offset.x,
+      offsetY: offset.y
+    });
+  }, [image, viewportSize, scale, offset]);
+
+  const activeCrop = draftCrop;
+  const overlayCrop = image && activeCrop && displayedRect
+    ? cropToOverlayRect(activeCrop, displayedRect, { width: image.width, height: image.height })
+    : null;
 
   const handlePointerDown = (event: React.PointerEvent<HTMLImageElement>) => {
     if (scale <= 1 || isCropping) {
@@ -112,7 +181,7 @@ const ImagePreviewCanvas = ({
   };
 
   const beginCropMove = (event: React.PointerEvent<HTMLDivElement>) => {
-    if (!draftCrop) {
+    if (!draftCrop || isCropCommitting) {
       return;
     }
 
@@ -127,7 +196,7 @@ const ImagePreviewCanvas = ({
   };
 
   const beginResizeSouthEast = (event: React.PointerEvent<HTMLButtonElement>) => {
-    if (!draftCrop) {
+    if (!draftCrop || isCropCommitting) {
       return;
     }
 
@@ -143,20 +212,27 @@ const ImagePreviewCanvas = ({
 
   const handleCropPointerMove = (event: React.PointerEvent<HTMLDivElement>) => {
     const interaction = cropInteractionRef.current;
-    if (!interaction || !image) {
+    if (!interaction || !image || isCropCommitting) {
       return;
     }
 
-    const deltaX = Math.round(event.clientX - interaction.startX);
-    const deltaY = Math.round(event.clientY - interaction.startY);
+    const imageDelta = displayedRect
+      ? pointerDeltaToImageDelta({
+          displayedRect,
+          imageWidth: image.width,
+          imageHeight: image.height,
+          deltaX: event.clientX - interaction.startX,
+          deltaY: event.clientY - interaction.startY
+        })
+      : { x: 0, y: 0 };
 
     if (interaction.mode === 'move') {
       setDraftCrop(
         clampCrop(
           {
             ...interaction.initialCrop,
-            x: interaction.initialCrop.x + deltaX,
-            y: interaction.initialCrop.y + deltaY
+            x: interaction.initialCrop.x + imageDelta.x,
+            y: interaction.initialCrop.y + imageDelta.y
           },
           image
         )
@@ -168,8 +244,8 @@ const ImagePreviewCanvas = ({
       clampCrop(
         {
           ...interaction.initialCrop,
-          width: interaction.initialCrop.width + deltaX,
-          height: interaction.initialCrop.height + deltaY
+          width: interaction.initialCrop.width + imageDelta.x,
+          height: interaction.initialCrop.height + imageDelta.y
         },
         image
       )
@@ -182,104 +258,131 @@ const ImagePreviewCanvas = ({
 
   return (
     <div
-      className="relative mt-3.5 flex min-h-[520px] items-center justify-center overflow-hidden rounded-[22px] border border-[#ececf2] bg-[linear-gradient(180deg,#f7f8fb_0%,#f2f4f8_100%)] px-5 py-4"
+      ref={viewportRef}
+      className="relative flex flex-1 w-full h-full items-center justify-center overflow-hidden bg-transparent"
       onPointerMove={handleCropPointerMove}
       onPointerUp={finishCropInteraction}
       onPointerLeave={finishCropInteraction}
     >
       {error ? (
-        <div className="max-w-md text-center">
-          <div className="text-base font-medium text-[#d94d80]">预览生成失败</div>
-          <p className="mt-2 text-sm text-[#8f95a2]">{error}</p>
+        <div className="max-w-md rounded border border-red-100 bg-white/50 p-8 text-center backdrop-blur-sm">
+          <div className="text-base font-bold text-meitu">{copy.previewFailed}</div>
+          <p className="mt-2 text-sm text-[#8D93A1]">{error}</p>
         </div>
-      ) : previewUrl ? (
-        <div className="w-full space-y-5">
-          <div className="relative flex min-h-[404px] items-center justify-center overflow-hidden rounded-[18px] border border-[#ececf2] bg-white px-5 py-4">
-            <img
-              src={previewUrl}
-              alt={image?.name ?? 'preview'}
-              className="max-h-[388px] rounded-[14px] object-contain shadow-[0_18px_36px_rgba(23,28,41,0.12)]"
+      ) : previewUrl && displayedRect ? (
+        <div
+          data-testid="preview-stage-content"
+          className="absolute"
+          style={{
+            left: displayedRect.left,
+            top: displayedRect.top,
+            width: displayedRect.width,
+            height: displayedRect.height
+          }}
+        >
+          <img
+            ref={previewImageRef}
+            src={previewUrl}
+            alt="preview"
+            className="h-full w-full rounded select-none"
+            style={{ cursor: scale > 1 && !isCropping ? 'grab' : 'default' }}
+            onPointerDown={handlePointerDown}
+            onPointerMove={handlePointerMove}
+            onPointerUp={handlePointerUp}
+            onPointerLeave={handlePointerUp}
+          />
+
+          {overlayCrop ? (
+            <div
+              data-testid="crop-box"
+              className={`absolute border-2 border-white shadow-[0_0_0_9999px_rgba(0,0,0,0.5),0_0_20px_rgba(255,45,108,0.3)] ring-2 ring-meitu ${isCropCommitting ? 'pointer-events-none opacity-80' : 'pointer-events-auto'}`}
               style={{
-                transform: `translate(${offset.x}px, ${offset.y}px) scale(${scale})`,
-                cursor: scale > 1 && !isCropping ? 'grab' : 'default'
+                left: overlayCrop.left - displayedRect.left,
+                top: overlayCrop.top - displayedRect.top,
+                width: overlayCrop.width,
+                height: overlayCrop.height
               }}
-              onPointerDown={handlePointerDown}
-              onPointerMove={handlePointerMove}
-              onPointerUp={handlePointerUp}
-              onPointerLeave={handlePointerUp}
-            />
-
-            {draftCrop ? (
-              <div className="pointer-events-none absolute inset-10 rounded-[18px] border border-dashed border-[#ffacc9] bg-[rgba(255,111,165,0.06)]">
-                <div
-                  data-testid="crop-box"
-                  className="pointer-events-auto absolute rounded-[18px] border border-[#ff8fb8] bg-[rgba(255,255,255,0.28)] shadow-[0_12px_28px_rgba(255,105,160,0.14)]"
-                  style={{
-                    left: `${(draftCrop.x / image!.width) * 100}%`,
-                    top: `${(draftCrop.y / image!.height) * 100}%`,
-                    width: `${(draftCrop.width / image!.width) * 100}%`,
-                    height: `${(draftCrop.height / image!.height) * 100}%`
-                  }}
-                  onPointerDown={beginCropMove}
-                >
-                  <div className="pointer-events-none absolute inset-x-0 top-0 flex justify-center pt-4 text-sm text-[#7d5062]">
-                    <div className="rounded-full border border-[#ffd3e2] bg-white px-4 py-2 shadow-[0_10px_24px_rgba(255,105,160,0.12)]">
-                      裁剪区域 {draftCrop.width} × {draftCrop.height}
-                    </div>
-                  </div>
-                  <button
-                    type="button"
-                    data-testid="crop-resize-se"
-                    aria-label="调整裁剪右下角"
-                    className="absolute right-[-10px] bottom-[-10px] h-5 w-5 rounded-full border border-white bg-[#ff6b9f] shadow-[0_8px_18px_rgba(255,105,160,0.28)]"
-                    onPointerDown={beginResizeSouthEast}
-                  />
-                </div>
+              onPointerDown={beginCropMove}
+            >
+              <div className="absolute inset-0 grid grid-cols-3 grid-rows-3 opacity-40">
+                {[...Array(4)].map((_, i) => (
+                  <div key={`v-${i}`} className="border-r border-white/60 h-full" />
+                ))}
+                {[...Array(4)].map((_, i) => (
+                  <div key={`h-${i}`} className="border-b border-white/60 w-full absolute left-0" style={{ top: `${i * 33.33}%` }} />
+                ))}
               </div>
-            ) : null}
-          </div>
 
-          <div className="flex flex-wrap items-center justify-center gap-x-5 gap-y-2 text-sm text-[#8a90a0]">
-            <span>亮度 {adjustments.brightness}</span>
-            <span>对比度 {adjustments.contrast}</span>
-            <span>饱和度 {adjustments.saturation}</span>
-          </div>
+              <div className="absolute -top-12 left-1/2 -translate-x-1/2 whitespace-nowrap rounded-full border border-white/20 bg-meitu/90 px-4 py-1.5 text-[11px] font-bold text-white shadow-2xl backdrop-blur-md">
+                {copy.cropArea} {activeCrop?.width ?? 0} × {activeCrop?.height ?? 0}
+              </div>
+
+              <div className="absolute -top-2 -left-2 w-4 h-4 rounded-full border-2 border-meitu bg-white shadow-lg" />
+              <div className="absolute -top-2 -right-2 w-4 h-4 rounded-full border-2 border-meitu bg-white shadow-lg" />
+              <div className="absolute -bottom-2 -left-2 w-4 h-4 rounded-full border-2 border-meitu bg-white shadow-lg" />
+              <button
+                type="button"
+                data-testid="crop-resize-se"
+                aria-label={copy.resizeSouthEast}
+                className="absolute -bottom-2 -right-2 w-5 h-5 rounded-full border-2 border-white bg-meitu shadow-xl cursor-nwse-resize active:scale-125 transition-all flex items-center justify-center"
+                onPointerDown={beginResizeSouthEast}
+              >
+                <div className="w-1.5 h-1.5 rounded-full bg-white" />
+              </button>
+            </div>
+          ) : null}
         </div>
-      ) : (
-        <div className="max-w-md text-center">
-          <div className="text-base font-medium text-[#454c59]">{image ? image.name : '等待打开本地图片'}</div>
-          <p className="mt-2 text-sm text-[#9aa0ad]">打开图片后，这里会显示真实预览。</p>
+      ) : previewUrl ? null : (
+        <div className="flex max-w-sm flex-col items-center gap-6 p-12 text-center">
+          <div className="flex h-20 w-20 items-center justify-center rounded bg-white text-meitu opacity-20">
+            <svg viewBox="0 0 24 24" className="w-10 h-10" fill="none" stroke="currentColor" strokeWidth="1.5">
+              <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
+              <circle cx="8.5" cy="8.5" r="1.5" />
+              <polyline points="21 15 16 10 5 21" />
+            </svg>
+          </div>
+          <div>
+            <div className="mb-2 text-lg font-bold text-[#1A1D23]">{copy.waitingTitle}</div>
+            <p className="text-sm leading-relaxed text-[#8D93A1]">{copy.waitingDescription}</p>
+          </div>
         </div>
       )}
 
       {isCropping ? (
-        <div className="absolute bottom-6 left-1/2 flex -translate-x-1/2 items-center gap-3 rounded-full bg-white px-4 py-3 shadow-[0_12px_28px_rgba(23,28,41,0.10)]">
+        <div className="absolute bottom-8 left-1/2 z-20 flex -translate-x-1/2 items-center gap-4 rounded border border-border-light bg-white p-2">
           <button
             type="button"
-            className="inline-flex h-9 items-center justify-center rounded-full bg-[linear-gradient(135deg,#ff6b9f_0%,#8d7dff_100%)] px-4 text-sm font-medium text-white"
+            disabled={isCropCommitting}
+            className="inline-flex h-10 items-center justify-center rounded bg-meitu px-6 text-sm font-bold text-white hover:brightness-110 active:scale-95 transition-all disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:brightness-100 disabled:active:scale-100"
             onClick={() => {
-              onApplyCrop(draftCrop);
-              onCroppingChange(false);
+              if (isCropCommitting) {
+                return;
+              }
+              void onApplyCrop(draftCrop);
             }}
           >
-            确认裁剪
+            {copy.confirmCrop}
           </button>
           <button
             type="button"
-            className="inline-flex h-9 items-center justify-center rounded-full border border-[#ececf2] bg-white px-4 text-sm text-[#59606f]"
+            disabled={isCropCommitting}
+            className="inline-flex h-10 items-center justify-center rounded px-6 text-sm font-bold text-[#5D6472] hover:bg-bg-main transition-all disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-transparent"
             onClick={() => {
               setDraftCrop(adjustments.crop);
               onCroppingChange(false);
             }}
           >
-            取消裁剪
+            {copy.cancelCrop}
           </button>
         </div>
       ) : null}
 
       {isLoading && !error ? (
-        <div className="pointer-events-none absolute inset-0 flex items-center justify-center rounded-[26px] bg-[rgba(255,255,255,0.56)]">
-          <div className="rounded-full border border-[#f0d7e1] bg-white px-4 py-2 text-sm text-[#7e8593]">正在更新预览...</div>
+        <div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-bg-main/40 backdrop-blur-[1px] transition-opacity duration-300">
+          <div className="flex flex-col items-center gap-3">
+            <div className="w-8 h-8 border-4 border-meitu/20 border-t-meitu rounded-full animate-spin" />
+            <div className="text-xs font-bold text-meitu uppercase tracking-widest">{copy.updatingPreview}</div>
+          </div>
         </div>
       ) : null}
     </div>

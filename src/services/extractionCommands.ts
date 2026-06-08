@@ -4,5 +4,8 @@ import type { ExtractDocumentImagesRequest, ExtractDocumentImagesResult, Extract
 export const inspectExtractionDocument = (path: string) =>
   invoke<ExtractionDocumentInfo>('inspect_extraction_document', { path });
 
+export const inspectExtractionDirectory = (path: string) =>
+  invoke<ExtractionDocumentInfo[]>('inspect_extraction_directory', { path });
+
 export const extractDocumentImages = (request: ExtractDocumentImagesRequest) =>
   invoke<ExtractDocumentImagesResult>('extract_document_images', { request });

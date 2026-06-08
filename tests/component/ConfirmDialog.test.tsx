@@ -9,7 +9,6 @@ describe('ConfirmDialog', () => {
       <ConfirmDialog
         open={false}
         title="存在未保存修改"
-        message="确认切换吗"
         confirmLabel="确认"
         cancelLabel="取消"
         onConfirm={() => undefined}
@@ -29,16 +28,22 @@ describe('ConfirmDialog', () => {
       <ConfirmDialog
         open
         title="存在未保存修改"
-        message="确认切换吗"
         confirmLabel="确认"
         cancelLabel="取消"
         onConfirm={onConfirm}
         onCancel={onCancel}
-      />
+      >
+        <p className="mt-3 text-sm text-[#515867]">确认切换吗</p>
+      </ConfirmDialog>
     );
 
     expect(screen.getByText('存在未保存修改')).toBeInTheDocument();
     expect(screen.getByText('确认切换吗')).toBeInTheDocument();
+
+    const overlay = screen.getByRole('dialog', { name: '存在未保存修改' }).parentElement;
+    expect(overlay?.className).not.toContain('bg-black/60');
+    expect(screen.getByRole('dialog', { name: '存在未保存修改' }).className).toContain('bg-white');
+    expect(screen.getByRole('button', { name: '确认' }).className).toContain('bg-meitu');
 
     await user.click(screen.getByRole('button', { name: '取消' }));
     await user.click(screen.getByRole('button', { name: '确认' }));

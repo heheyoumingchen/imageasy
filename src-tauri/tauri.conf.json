@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "图片批量处理助手",
+  "productName": "imageasy",
   "version": "0.1.0",
   "identifier": "com.anthropic.imagebatchhelper",
   "build": {
@@ -12,17 +12,32 @@
   "app": {
     "windows": [
       {
-        "title": "图片批量处理助手",
-        "width": 1440,
-        "height": 900,
-        "resizable": true
+        "title": "imageasy",
+        "width": 1280,
+        "height": 832,
+        "minWidth": 960,
+        "minHeight": 640,
+        "resizable": true,
+        "decorations": false
       }
     ]
   },
   "bundle": {
     "active": true,
-    "targets": "all",
-    "icon": [],
-    "resources": ["pdfium/*"]
+    "targets": ["nsis"],
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "resources": ["pdfium/*"],
+    "windows": {
+      "nsis": {
+        "languages": ["SimpChinese", "English"]
+      }
+    }
   }
 }

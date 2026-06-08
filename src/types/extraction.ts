@@ -7,12 +7,14 @@ export type ExtractionDocumentInfo = {
 };
 
 export type ExtractionOutputFormat = 'png' | 'jpg';
-export type ExtractionNamingPattern = 'source-name-index';
+export type ExtractionColorMode = 'rgb' | 'cmyk' | 'gray-cmyk';
+export type ExtractionNamingPattern = 'source-name-index' | 'source-name-date';
 
 export type ExtractDocumentImagesRequest = {
   sourcePath: string;
   outputDirectory: string;
   outputFormat: ExtractionOutputFormat;
+  colorMode: ExtractionColorMode;
   namingPattern: ExtractionNamingPattern;
 };
 

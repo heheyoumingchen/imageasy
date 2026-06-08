@@ -1,48 +1,86 @@
-import navItems, { type AppPageKey } from '../../app/navItems';
+import { Download, Image, Repeat, FileSearch, Settings, Scissors, Grid3x3 } from 'lucide-react';
+import { getNavItems, type AppLanguage, type AppPageKey } from '../../app/navItems';
 
 type SideNavProps = {
   currentPage: AppPageKey;
+  language: AppLanguage;
   onSelect: (page: AppPageKey) => void;
 };
 
-const SideNav = ({ currentPage, onSelect }: SideNavProps) => {
-  return (
-    <aside className="flex w-[104px] shrink-0 flex-col border-r border-[#e7e8ef] bg-[#fbfbfd] px-3 py-4">
-      <div className="mb-5 flex justify-center">
-        <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-[linear-gradient(135deg,#ff77aa_0%,#8d7bff_100%)] text-lg font-semibold text-white shadow-[0_10px_24px_rgba(255,105,160,0.28)]">
-          美
-        </div>
-      </div>
+const SideNav = ({ currentPage, language, onSelect }: SideNavProps) => {
+  const navItems = getNavItems(language);
+  const settingsLabel = language === 'en-US' ? 'Settings' : '设置';
+  const settingsActive = currentPage === 'settings';
 
+  const getIcon = (key: AppPageKey, active: boolean) => {
+    const size = 24;
+    const color = active ? 'var(--color-meitu)' : '#656B78';
+
+    switch (key) {
+      case 'image-editor':
+        return <Image size={size} color={color} />;
+      case 'convert-image':
+        return <Repeat size={size} color={color} />;
+      case 'extract-image':
+        return <FileSearch size={size} color={color} />;
+      case 'split-image':
+        return <Scissors size={size} color={color} />;
+      case 'stitch-image':
+        return <Grid3x3 size={size} color={color} />;
+      case 'image-download':
+        return <Download size={size} color={color} />;
+      case 'settings':
+        return <Settings size={size} color={color} />;
+      default:
+        return null;
+    }
+  };
+
+  return (
+    <aside className="flex w-[112px] shrink-0 flex-col border-r border-border-light bg-white px-3 py-4">
       <nav aria-label="主导航" className="flex-1 space-y-2">
-        {navItems.filter((item) => item.key !== 'task-center').map((item) => {
+        {navItems.map((item) => {
           const active = item.key === currentPage;
 
           return (
             <button
               key={item.key}
               type="button"
-              aria-label={item.label}
-              aria-current={active ? 'page' : undefined}
               onClick={() => onSelect(item.key)}
-              className={`flex w-full flex-col items-center gap-1.5 rounded-[16px] px-2 py-3 text-center transition ${
+              className={`group relative flex w-full flex-col items-center gap-1.5 rounded px-2 py-4 transition-all duration-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-meitu/30 ${
                 active
-                  ? 'bg-[#fff0f5] text-[#ff5c93] shadow-[inset_0_0_0_1px_rgba(255,92,147,0.18)]'
-                  : 'text-[#656b78] hover:bg-[#f3f4f8] hover:text-[#3a4050]'
+                  ? 'bg-meitu-light text-meitu'
+                  : 'text-[#656B78] hover:bg-[#F8F9FB] hover:text-[#2F3440]'
               }`}
             >
-              <span className={`inline-flex h-7 w-7 items-center justify-center rounded-full border text-[11px] shadow-[inset_0_1px_0_rgba(255,255,255,0.35)] ${active ? 'border-[#ffc4d8] bg-[#ffe1ec] text-[#ff5c93]' : 'border-[#eceef4] bg-[#f7f8fb] text-[#8d93a1]'}`}>
-                {item.label.slice(0, 1)}
+              <div className={`transition-transform duration-300 ${active ? 'scale-110' : 'scale-100 group-hover:scale-105'}`}>
+                {getIcon(item.key, active)}
+              </div>
+              <span className={`text-[11px] font-semibold tracking-[0.06em] transition-colors duration-300 ${active ? 'text-meitu' : 'text-[#8D93A1]'}`}>
+                {item.label}
               </span>
-              <span className="text-[10px] font-medium leading-[1.35] text-current">{item.label}</span>
-              <span aria-hidden="true" className="hidden">{item.description}</span>
             </button>
           );
         })}
       </nav>
 
-      <div className="mt-4 flex items-center justify-center rounded-[16px] border border-[#f0f1f5] bg-[#fcfcfe] px-2 py-2.5 text-[10px] text-[#adb2bd]">
-        设置
+      <div className="mt-4 border-t border-border-light/60 pt-4">
+        <button
+          type="button"
+          onClick={() => onSelect('settings')}
+          className={`group relative flex w-full flex-col items-center gap-1.5 rounded px-2 py-4 transition-all duration-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-meitu/30 ${
+            settingsActive
+              ? 'bg-meitu-light text-meitu'
+              : 'text-[#656B78] hover:bg-[#F8F9FB] hover:text-[#2F3440]'
+          }`}
+        >
+          <div className={`transition-transform duration-300 ${settingsActive ? 'scale-110' : 'scale-100 group-hover:scale-105'}`}>
+            {getIcon('settings', settingsActive)}
+          </div>
+          <span className={`text-[11px] font-semibold tracking-[0.06em] transition-colors duration-300 ${settingsActive ? 'text-meitu' : 'text-[#8D93A1]'}`}>
+            {settingsLabel}
+          </span>
+        </button>
       </div>
     </aside>
   );

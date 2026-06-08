@@ -6,28 +6,37 @@ import {
   type CropRect,
   type EditorDirectoryImage,
   type EditorImageSummary,
+  type EditorSnapshot,
   type FilterType,
   type PendingSwitchTarget,
-  type Rotation
+  type Rotation,
+  type WorkingImageSummary
 } from '../types/editor';
 
 type OpenImagesPayload = {
-  currentImage: EditorImageSummary;
+  currentImage: WorkingImageSummary;
   directoryImages: EditorDirectoryImage[];
   currentIndex: number;
 };
 
+type CommitDestructiveCropPayload = {
+  workingImage: WorkingImageSummary;
+  preservedAdjustments: AdjustmentParams;
+};
+
 type EditorStore = {
-  currentImage: EditorImageSummary | null;
+  originalImage: EditorImageSummary | null;
+  currentImage: WorkingImageSummary | null;
   directoryImages: EditorDirectoryImage[];
   currentIndex: number;
   adjustments: AdjustmentParams;
-  past: AdjustmentParams[];
-  future: AdjustmentParams[];
+  past: EditorSnapshot[];
+  future: EditorSnapshot[];
   hasUnsavedChanges: boolean;
   pendingSwitchTarget: PendingSwitchTarget | null;
   openImages: (payload: OpenImagesPayload) => void;
   commitAdjustments: (next: AdjustmentParams) => void;
+  commitDestructiveCrop: (payload: CommitDestructiveCropPayload) => void;
   updateAdjustment: (key: AdjustmentKey, value: number) => void;
   updateFilter: (filterType: FilterType) => void;
   updateFilterIntensity: (value: number) => void;
@@ -74,21 +83,57 @@ const buildImageFromIndex = (images: EditorDirectoryImage[], index: number) => {
   return { path, name, extension, width, height, sizeBytes } satisfies EditorImageSummary;
 };
 
+type EditorCheckpoint = {
+  originalImage: EditorImageSummary | null;
+  currentImage: WorkingImageSummary | null;
+  currentIndex: number;
+  adjustments: AdjustmentParams;
+};
+
+const createCheckpoint = (state: EditorCheckpoint): EditorCheckpoint => ({
+  originalImage: state.originalImage,
+  currentImage: state.currentImage,
+  currentIndex: state.currentIndex,
+  adjustments: state.adjustments
+});
+
+const hasCheckpointChanges = (state: EditorCheckpoint, savedCheckpoint: EditorCheckpoint) =>
+  JSON.stringify(createCheckpoint(state)) !== JSON.stringify(savedCheckpoint);
+
+const createSnapshot = (state: EditorCheckpoint & { hasUnsavedChanges: boolean }): EditorSnapshot => ({
+  ...createCheckpoint(state),
+  hasUnsavedChanges: state.hasUnsavedChanges
+});
+
 const initialState = {
+  originalImage: null,
   currentImage: null,
   directoryImages: [],
   currentIndex: -1,
   adjustments: defaultAdjustmentParams,
-  past: [] as AdjustmentParams[],
-  future: [] as AdjustmentParams[],
+  past: [] as EditorSnapshot[],
+  future: [] as EditorSnapshot[],
   hasUnsavedChanges: false,
   pendingSwitchTarget: null
 };
 
-export const useEditorStore = create<EditorStore>((set, get) => ({
-  ...initialState,
-  openImages: ({ currentImage, directoryImages, currentIndex }) =>
+const initialCheckpoint = createCheckpoint(initialState);
+
+export const useEditorStore = create<EditorStore>((set, get) => {
+  let savedCheckpoint = initialCheckpoint;
+
+  return {
+    ...initialState,
+  openImages: ({ currentImage, directoryImages, currentIndex }) => {
+    savedCheckpoint = {
+      originalImage: currentImage,
+      currentImage,
+      currentIndex,
+      adjustments: defaultAdjustmentParams
+    };
+
     set({
+      originalImage: currentImage,
       currentImage,
       directoryImages,
       currentIndex,
@@ -97,18 +142,49 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
       future: [],
       hasUnsavedChanges: false,
       pendingSwitchTarget: null
-    }),
+    });
+  },
   commitAdjustments: (next) =>
     set((state) => {
       if (JSON.stringify(state.adjustments) === JSON.stringify(next)) {
         return state;
       }
 
+      const nextState = {
+        originalImage: state.originalImage,
+        currentImage: state.currentImage,
+        currentIndex: state.currentIndex,
+        adjustments: next
+      };
+
       return {
         adjustments: next,
-        past: [...state.past, state.adjustments],
+        past: [...state.past, createSnapshot(state)],
         future: [],
-        hasUnsavedChanges: true
+        hasUnsavedChanges: hasCheckpointChanges(nextState, savedCheckpoint)
+      };
+    }),
+  commitDestructiveCrop: ({ workingImage, preservedAdjustments }) =>
+    set((state) => {
+      const normalizedAdjustments = {
+        ...preservedAdjustments,
+        rotation: 0 as Rotation,
+        crop: null
+      };
+
+      const nextState = {
+        originalImage: state.originalImage,
+        currentImage: workingImage,
+        currentIndex: state.currentIndex,
+        adjustments: normalizedAdjustments
+      };
+
+      return {
+        currentImage: workingImage,
+        adjustments: normalizedAdjustments,
+        past: [...state.past, createSnapshot(state)],
+        future: [],
+        hasUnsavedChanges: hasCheckpointChanges(nextState, savedCheckpoint)
       };
     }),
   updateAdjustment: (key, value) => {
@@ -158,11 +234,16 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
       return;
     }
 
+    const previousCheckpoint = createCheckpoint(previous);
+
     set({
-      adjustments: previous,
+      originalImage: previous.originalImage,
+      currentImage: previous.currentImage,
+      currentIndex: previous.currentIndex,
+      adjustments: previous.adjustments,
       past: state.past.slice(0, -1),
-      future: [state.adjustments, ...state.future],
-      hasUnsavedChanges: true
+      future: [createSnapshot(state), ...state.future],
+      hasUnsavedChanges: hasCheckpointChanges(previousCheckpoint, savedCheckpoint)
     });
   },
   redo: () => {
@@ -173,14 +254,23 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
       return;
     }
 
+    const nextCheckpoint = createCheckpoint(next);
+
     set({
-      adjustments: next,
-      past: [...state.past, state.adjustments],
+      originalImage: next.originalImage,
+      currentImage: next.currentImage,
+      currentIndex: next.currentIndex,
+      adjustments: next.adjustments,
+      past: [...state.past, createSnapshot(state)],
       future: rest,
-      hasUnsavedChanges: true
+      hasUnsavedChanges: hasCheckpointChanges(nextCheckpoint, savedCheckpoint)
     });
   },
-  markSaved: () => set({ hasUnsavedChanges: false, pendingSwitchTarget: null }),
+  markSaved: () => {
+    const state = get();
+    savedCheckpoint = createCheckpoint(state);
+    set({ hasUnsavedChanges: false, pendingSwitchTarget: null });
+  },
   requestSwitch: (target) => {
     if (get().hasUnsavedChanges) {
       set({ pendingSwitchTarget: target });
@@ -208,7 +298,15 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
       return;
     }
 
+    savedCheckpoint = {
+      originalImage: currentImage,
+      currentImage,
+      currentIndex: index,
+      adjustments: defaultAdjustmentParams
+    };
+
     set({
+      originalImage: currentImage,
       currentImage,
       currentIndex: index,
       adjustments: defaultAdjustmentParams,
@@ -234,5 +332,9 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
 
     get().requestSwitch({ index: currentIndex + 1, reason: 'next' });
   },
-  reset: () => set(initialState)
-}));
+  reset: () => {
+    savedCheckpoint = initialCheckpoint;
+    set(initialState);
+  }
+  };
+});

@@ -6,3 +6,10 @@ dist-electron/
 src-tauri/target/
 src-tauri/settings.json
 src-tauri/pdfium/
+
+# 构建产物 / 大文件
+green-package/
+设计稿/pdfium_x86-64.zip
+
+# Claude worktrees（内嵌 git 仓库）
+.claude/worktrees/

@@ -1,17 +1,26 @@
-export type AppPageKey = 'image-editor' | 'convert-image' | 'extract-image' | 'task-center' | 'settings';
+export type AppPageKey = 'image-editor' | 'convert-image' | 'extract-image' | 'split-image' | 'stitch-image' | 'image-download' | 'settings';
+export type AppLanguage = 'zh-CN' | 'en-US';
 
 export type NavItem = {
   key: AppPageKey;
   label: string;
-  description: string;
 };
 
-const navItems: NavItem[] = [
-  { key: 'image-editor', label: '图片编辑', description: '单图编辑与预览' },
-  { key: 'convert-image', label: '转换图片', description: '批量转换入口' },
-  { key: 'extract-image', label: '提取图片', description: '文档抽图入口' },
-  { key: 'task-center', label: '任务中心', description: '查看任务历史与状态' },
-  { key: 'settings', label: '设置', description: '主题、并发与偏好' }
-];
-
-export default navItems;
+export const getNavItems = (language: AppLanguage): NavItem[] =>
+  language === 'en-US'
+    ? [
+        { key: 'image-editor', label: 'Editor' },
+        { key: 'convert-image', label: 'Convert' },
+        { key: 'extract-image', label: 'Extract' },
+        { key: 'split-image', label: 'Split' },
+        { key: 'stitch-image', label: 'Stitch' },
+        { key: 'image-download', label: 'Download' }
+      ]
+    : [
+        { key: 'image-editor', label: '图片编辑' },
+        { key: 'convert-image', label: '格式转换' },
+        { key: 'extract-image', label: '图片提取' },
+        { key: 'split-image', label: '图片分割' },
+        { key: 'stitch-image', label: '图片拼接' },
+        { key: 'image-download', label: '图片下载' }
+      ];

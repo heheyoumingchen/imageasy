@@ -3,21 +3,42 @@ import { formatFileSize } from '../../utils/formatters';
 
 type EditorBottomStatusBarProps = {
   image: EditorImageSummary | null;
+  originalName?: string | null;
   currentIndex: number;
+  isEnglish?: boolean;
   totalImages: number;
 };
 
-const EditorBottomStatusBar = ({ image, currentIndex, totalImages }: EditorBottomStatusBarProps) => {
+const EditorBottomStatusBar = ({ image, originalName, currentIndex, isEnglish = false, totalImages }: EditorBottomStatusBarProps) => {
+  const copy = isEnglish
+    ? {
+        currentFile: 'Current file',
+        unopened: 'Not opened'
+      }
+    : {
+        currentFile: '当前文件',
+        unopened: '未打开'
+      };
+
   return (
-    <footer className="rounded-[20px] border border-[#ececf2] bg-white px-5 py-4 shadow-[0_10px_24px_rgba(23,28,41,0.04)]">
-      <div className="flex flex-wrap items-center justify-between gap-4 text-sm text-[#5a6170]">
-        <div className="flex flex-wrap items-center gap-4">
-          <span className="text-[11px] tracking-[0.14em] text-[#a0a6b2]">当前文件</span>
-          <span>{image?.name ?? '未打开'}</span>
-          <span>{image ? `${image.width} × ${image.height}` : '--'}</span>
-          <span>{image ? formatFileSize(image.sizeBytes) : '--'}</span>
+    <footer
+      role="contentinfo"
+      className="flex items-center justify-between px-6 py-2.5 text-[12px] text-[#8D93A1] border-t border-border-light bg-white"
+    >
+      <div className="flex items-center gap-6">
+        <div className="flex items-center gap-2">
+          <span className="font-bold uppercase tracking-wider opacity-60">{copy.currentFile}:</span>
+          <span className="font-bold text-[#313744]">
+            {image ? `${originalName ?? image.name} · ${isEnglish ? 'Size:' : '尺寸：'}${image.width} × ${image.height} · ${isEnglish ? 'File size:' : '大小：'}${formatFileSize(image.sizeBytes)}` : copy.unopened}
+          </span>
         </div>
-        <div className="text-sm text-[#7f8795]">{totalImages === 0 ? '-- / --' : `${currentIndex + 1} / ${totalImages}`}</div>
+      </div>
+
+      <div className="flex items-center gap-6">
+        <div className="font-bold text-meitu bg-meitu-light px-3 py-0.5 rounded-full text-[11px] tabular-nums">
+          {totalImages === 0 ? '0 / 0' : `${currentIndex + 1} / ${totalImages}`}
+        </div>
+        <span className="font-bold opacity-60">Version: v1.0.0</span>
       </div>
     </footer>
   );

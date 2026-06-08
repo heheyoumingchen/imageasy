@@ -5,13 +5,14 @@ const readyImage = {
   id: 'a',
   sourcePath: 'F:/demo/a.jpg',
   sourceName: 'a.jpg',
+  sourceStem: 'a',
   kind: 'image' as const,
   status: 'ready' as const,
   errorMessage: null,
-  outputSuffix: '',
   outputSettingsOverride: {},
   imageMetadata: { width: 800, height: 600, extension: 'jpg' },
   documentMetadata: null,
+  selected: true,
   outputPaths: []
 };
 
@@ -19,13 +20,14 @@ const readyDocument = {
   id: 'b',
   sourcePath: 'F:/demo/b.pdf',
   sourceName: 'b.pdf',
+  sourceStem: 'b',
   kind: 'document' as const,
   status: 'ready' as const,
   errorMessage: null,
-  outputSuffix: '',
   outputSettingsOverride: {},
   imageMetadata: null,
   documentMetadata: { pageCount: 12, extension: 'pdf' },
+  selected: true,
   outputPaths: []
 };
 

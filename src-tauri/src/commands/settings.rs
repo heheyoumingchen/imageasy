@@ -14,7 +14,7 @@ pub struct PersistedSettings {
 
 fn default_settings() -> PersistedSettings {
     PersistedSettings {
-        theme: "dark".into(),
+        theme: "light".into(),
         language: "zh-CN".into(),
         max_concurrency: 2,
         output_directory_strategy: "same-as-source".into(),
@@ -23,9 +23,13 @@ fn default_settings() -> PersistedSettings {
 }
 
 fn settings_path() -> Result<PathBuf> {
-    let mut path = std::env::current_dir().context("无法定位应用目录")?;
-    path.push("settings.json");
-    Ok(path)
+    if let Some(data_dir) = crate::portable::portable_data_dir() {
+        Ok(data_dir.join("settings.json"))
+    } else {
+        let mut path = std::env::current_dir().context("无法定位应用目录")?;
+        path.push("settings.json");
+        Ok(path)
+    }
 }
 
 #[tauri::command]

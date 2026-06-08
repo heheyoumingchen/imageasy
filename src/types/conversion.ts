@@ -1,7 +1,7 @@
 export type ConversionSourceKind = 'image' | 'document' | 'unsupported';
 export type ConversionOutputFormat = 'jpg' | 'png' | 'webp';
 export type ConversionColorMode = 'rgb' | 'cmyk' | 'gray-cmyk';
-export type ConversionStatus = 'inspecting' | 'ready' | 'running' | 'success' | 'failed' | 'unsupported';
+export type ConversionStatus = 'ready' | 'running' | 'success' | 'failed' | 'unsupported';
 export type PageRangeMode = 'all' | 'custom';
 
 export type ConversionImageMetadata = {
@@ -23,25 +23,24 @@ export type ConversionOutputSettings = {
   pageRangeText: string;
   renderDensity: 'standard' | 'high';
   outputDirectory: string;
-  namingPattern: 'source-name' | 'source-name-page';
-  collisionStrategy: 'overwrite' | 'rename' | 'skip';
+  namingPattern: 'source-name-index' | 'source-name-date';
 };
 
 export type ConversionItem = {
   id: string;
   sourcePath: string;
   sourceName: string;
+  sourceStem: string;
   kind: ConversionSourceKind;
   status: ConversionStatus;
   errorMessage: string | null;
-  outputSuffix: string;
   outputSettingsOverride: {
     pageRangeMode?: PageRangeMode;
     pageRangeText?: string;
-    outputSuffix?: string;
   };
   imageMetadata: ConversionImageMetadata | null;
   documentMetadata: ConversionDocumentMetadata | null;
+  selected: boolean;
   outputPaths: string[];
 };
 
@@ -69,5 +68,5 @@ export type RenderDocumentToImagesRequest = {
   colorMode: ConversionColorMode;
   pageNumbers: number[];
   renderDensity: 'standard' | 'high';
-  namingPattern: 'source-name' | 'source-name-page';
+  namingPattern: 'source-name-index' | 'source-name-date';
 };

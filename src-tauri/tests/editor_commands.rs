@@ -4,9 +4,9 @@ use base64::{engine::general_purpose::STANDARD, Engine as _};
 use image::{GenericImageView, ImageBuffer, Rgba};
 use tempfile::tempdir;
 
-use image_batch_helper_lib::commands::editor::{
-    open_image_session, generate_image_preview, save_image_as_jpg, AdjustmentParams,
-    CropRect, GenerateImagePreviewRequest, SaveImageAsJpgRequest,
+use imageasy_lib::commands::editor::{
+    open_image_session, generate_image_preview, save_image_as_jpg, commit_crop_to_working_image,
+    AdjustmentParams, CommitCropRequest, CropRect, GenerateImagePreviewRequest, SaveImageAsJpgRequest,
 };
 
 fn default_adjustments() -> AdjustmentParams {
@@ -14,9 +14,11 @@ fn default_adjustments() -> AdjustmentParams {
         brightness: 0,
         contrast: 0,
         saturation: 0,
+        temperature: 0,
+        tint: 0,
         sharpen: 0,
         clarity: 0,
-        quality: 90,
+        quality: 100,
         filter_type: "none".into(),
         filter_intensity: 0,
         rotation: 0,
@@ -134,6 +136,41 @@ fn warm_filter_changes_preview_pixels() {
 }
 
 #[test]
+fn temperature_and_tint_change_preview_pixels() {
+    let dir = tempdir().unwrap();
+    let source = dir.path().join("temperature-tint-preview.png");
+
+    ImageBuffer::<Rgba<u8>, _>::from_pixel(6, 6, Rgba([128, 128, 128, 255]))
+        .save(&source)
+        .unwrap();
+
+    let neutral = generate_image_preview(GenerateImagePreviewRequest {
+        path: source.to_string_lossy().into_owned(),
+        adjustments: default_adjustments(),
+        max_width: Some(320),
+        max_height: Some(240),
+    })
+    .unwrap();
+
+    let mut adjusted_adjustments = default_adjustments();
+    adjusted_adjustments.temperature = 80;
+    adjusted_adjustments.tint = 45;
+
+    let adjusted = generate_image_preview(GenerateImagePreviewRequest {
+        path: source.to_string_lossy().into_owned(),
+        adjustments: adjusted_adjustments,
+        max_width: Some(320),
+        max_height: Some(240),
+    })
+    .unwrap();
+
+    let neutral_image = image::load_from_memory(&STANDARD.decode(neutral.data_url.split(',').nth(1).unwrap()).unwrap()).unwrap();
+    let adjusted_image = image::load_from_memory(&STANDARD.decode(adjusted.data_url.split(',').nth(1).unwrap()).unwrap()).unwrap();
+
+    assert_ne!(adjusted_image.get_pixel(0, 0).0, neutral_image.get_pixel(0, 0).0);
+}
+
+#[test]
 fn grayscale_filter_changes_saved_output_pixels() {
     let dir = tempdir().unwrap();
     let source = dir.path().join("grayscale-source.png");
@@ -160,6 +197,42 @@ fn grayscale_filter_changes_saved_output_pixels() {
 
     assert_eq!(pixel[0], pixel[1]);
     assert_eq!(pixel[1], pixel[2]);
+}
+
+
+#[test]
+fn sepia_filter_changes_preview_pixels() {
+    let dir = tempdir().unwrap();
+    let source = dir.path().join("sepia-preview.png");
+
+    ImageBuffer::<Rgba<u8>, _>::from_pixel(6, 6, Rgba([90, 120, 180, 255]))
+        .save(&source)
+        .unwrap();
+
+    let neutral = generate_image_preview(GenerateImagePreviewRequest {
+        path: source.to_string_lossy().into_owned(),
+        adjustments: default_adjustments(),
+        max_width: Some(320),
+        max_height: Some(240),
+    })
+    .unwrap();
+
+    let mut sepia_adjustments = default_adjustments();
+    sepia_adjustments.filter_type = "sepia".into();
+    sepia_adjustments.filter_intensity = 100;
+
+    let sepia = generate_image_preview(GenerateImagePreviewRequest {
+        path: source.to_string_lossy().into_owned(),
+        adjustments: sepia_adjustments,
+        max_width: Some(320),
+        max_height: Some(240),
+    })
+    .unwrap();
+
+    let neutral_image = image::load_from_memory(&STANDARD.decode(neutral.data_url.split(',').nth(1).unwrap()).unwrap()).unwrap();
+    let sepia_image = image::load_from_memory(&STANDARD.decode(sepia.data_url.split(',').nth(1).unwrap()).unwrap()).unwrap();
+
+    assert_ne!(sepia_image.get_pixel(0, 0).0, neutral_image.get_pixel(0, 0).0);
 }
 
 #[test]
@@ -255,3 +328,64 @@ fn preview_and_save_share_rotation_and_crop_semantics() {
     let output = image::open(&target).unwrap();
     assert_eq!((preview.width, preview.height), output.dimensions());
 }
+
+#[test]
+fn commit_crop_creates_a_new_working_canvas_after_rotation() {
+    let dir = tempdir().unwrap();
+    let source = dir.path().join("crop-commit-source.png");
+
+    ImageBuffer::<Rgba<u8>, _>::from_pixel(12, 8, Rgba([40, 160, 220, 255]))
+        .save(&source)
+        .unwrap();
+
+    let result = commit_crop_to_working_image(CommitCropRequest {
+        source_path: source.to_string_lossy().into_owned(),
+        rotation: 90,
+        crop: CropRect {
+            x: 1,
+            y: 2,
+            width: 5,
+            height: 4,
+        },
+    })
+    .unwrap();
+
+    let output = image::open(&result.working_image.path).unwrap();
+    assert_eq!(output.dimensions(), (5, 4));
+    assert_eq!(result.working_image.width, 5);
+    assert_eq!(result.working_image.height, 4);
+    assert_ne!(result.working_image.path, source.to_string_lossy());
+}
+
+#[test]
+fn commit_crop_uses_a_stable_working_directory_even_for_existing_working_images() {
+    let dir = tempdir().unwrap();
+    let working_dir = dir.path().join(".editor-work");
+    std::fs::create_dir_all(&working_dir).unwrap();
+    let source = working_dir.join("crop-commit-source.png");
+
+    ImageBuffer::<Rgba<u8>, _>::from_pixel(10, 8, Rgba([90, 140, 210, 255]))
+        .save(&source)
+        .unwrap();
+
+    let result = commit_crop_to_working_image(CommitCropRequest {
+        source_path: source.to_string_lossy().into_owned(),
+        rotation: 0,
+        crop: CropRect {
+            x: 1,
+            y: 1,
+            width: 6,
+            height: 5,
+        },
+    })
+    .unwrap();
+
+    let output_path = PathBuf::from(&result.working_image.path);
+    let expected_working_dir = std::env::temp_dir()
+        .join("imageasy")
+        .join("editor-work");
+
+    assert_eq!(output_path.parent(), Some(expected_working_dir.as_path()));
+    assert!(output_path.exists());
+}
+

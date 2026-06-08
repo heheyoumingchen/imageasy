@@ -17,6 +17,8 @@ const adjustments: AdjustmentParams = {
   brightness: 12,
   contrast: 18,
   saturation: 24,
+  temperature: 0,
+  tint: 0,
   sharpen: 8,
   clarity: 10,
   quality: 90,
@@ -46,14 +48,28 @@ describe('ImagePreviewCanvas', () => {
     expect(screen.getByRole('button', { name: '取消裁剪' })).toBeInTheDocument();
   });
 
-  it('updates the crop rectangle by dragging the box and resizing from the handle', async () => {
+  it('translates crop move and resize deltas from preview pixels back to source-image pixels', async () => {
     const onApplyCrop = vi.fn();
     const user = userEvent.setup();
+    const rectSpy = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue({
+      x: 0,
+      y: 0,
+      left: 0,
+      top: 0,
+      right: 1000,
+      bottom: 750,
+      width: 1000,
+      height: 750,
+      toJSON: () => ({})
+    } as DOMRect);
 
     render(
       <ImagePreviewCanvas
         image={image}
-        adjustments={adjustments}
+        adjustments={{
+          ...adjustments,
+          crop: { x: 200, y: 100, width: 1000, height: 500 }
+        }}
         previewUrl="data:image/jpeg;base64,preview-a"
         isLoading={false}
         error={null}
@@ -66,21 +82,28 @@ describe('ImagePreviewCanvas', () => {
 
     const cropBox = screen.getByTestId('crop-box');
     await user.pointer([
-      { keys: '[MouseLeft>]', target: cropBox, coords: { clientX: 200, clientY: 180 } },
-      { target: cropBox, coords: { clientX: 260, clientY: 230 } },
+      { keys: '[MouseLeft>]', target: cropBox, coords: { clientX: 100, clientY: 100 } },
+      { target: cropBox, coords: { clientX: 150, clientY: 125 } },
       { keys: '[/MouseLeft]', target: cropBox }
     ]);
 
     const resizeHandle = screen.getByTestId('crop-resize-se');
     await user.pointer([
-      { keys: '[MouseLeft>]', target: resizeHandle, coords: { clientX: 360, clientY: 300 } },
-      { target: resizeHandle, coords: { clientX: 430, clientY: 350 } },
+      { keys: '[MouseLeft>]', target: resizeHandle, coords: { clientX: 700, clientY: 350 } },
+      { target: resizeHandle, coords: { clientX: 750, clientY: 375 } },
       { keys: '[/MouseLeft]', target: resizeHandle }
     ]);
 
     await user.click(screen.getByRole('button', { name: '确认裁剪' }));
 
-    expect(onApplyCrop).toHaveBeenCalledWith({ x: 300, y: 230, width: 1190, height: 890 });
+    expect(onApplyCrop).toHaveBeenCalledWith({
+      x: 280,
+      y: 140,
+      width: 1080,
+      height: 540
+    });
+
+    rectSpy.mockRestore();
   });
 
   it('cancels crop edits without committing draft changes', async () => {
@@ -115,8 +138,19 @@ describe('ImagePreviewCanvas', () => {
     expect(onCroppingChange).toHaveBeenCalledWith(false);
   });
 
-  it('pans the preview image when scaled above 1', async () => {
+  it('pans the preview stage content when scaled above 1', async () => {
     const user = userEvent.setup();
+    const rectSpy = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue({
+      x: 0,
+      y: 0,
+      left: 0,
+      top: 0,
+      right: 1000,
+      bottom: 750,
+      width: 1000,
+      height: 750,
+      toJSON: () => ({})
+    } as DOMRect);
 
     render(
       <ImagePreviewCanvas
@@ -132,8 +166,10 @@ describe('ImagePreviewCanvas', () => {
       />
     );
 
-    const previewImage = screen.getByRole('img', { name: '示例图片_A.jpg' });
-    expect(previewImage).toHaveStyle({ transform: 'translate(0px, 0px) scale(1.5)' });
+    const previewImage = screen.getByRole('img', { name: 'preview' });
+    const stageContent = screen.getByTestId('preview-stage-content');
+    expect(stageContent.style.left).toBe('-250px');
+    expect(stageContent.style.top).toBe('-187.5px');
 
     await user.pointer([
       { keys: '[MouseLeft>]', target: previewImage, coords: { clientX: 0, clientY: 0 } },
@@ -141,6 +177,9 @@ describe('ImagePreviewCanvas', () => {
       { keys: '[/MouseLeft]', target: previewImage }
     ]);
 
-    expect(previewImage.style.transform).toMatch(/translate\([^,]+px, [^)]+px\) scale\(1.5\)/);
+    expect(stageContent.style.left).toBe('-210px');
+    expect(stageContent.style.top).toBe('-157.5px');
+
+    rectSpy.mockRestore();
   });
 });

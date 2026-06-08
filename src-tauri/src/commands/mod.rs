@@ -1,4 +1,10 @@
+pub mod common;
 pub mod conversion;
 pub mod editor;
 pub mod extraction;
+pub mod image_download;
+pub mod pdf_rendering;
 pub mod settings;
+pub mod splitting;
+pub mod stitching;
+pub mod system;

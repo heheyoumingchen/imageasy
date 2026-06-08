@@ -19,6 +19,7 @@ type ConversionStore = {
   stats: ConversionStats;
   setItems: (items: ConversionItem[]) => void;
   selectItem: (id: string) => void;
+  toggleItemSelected: (id: string) => void;
   updateGlobalSettings: (partial: Partial<ConversionOutputSettings>) => void;
   updateItemOverride: (id: string, partial: ConversionItem['outputSettingsOverride']) => void;
   buildEffectiveDocumentPages: (id: string) => number[];
@@ -32,13 +33,12 @@ type ConversionStore = {
 const defaultGlobalSettings: ConversionOutputSettings = {
   outputFormat: 'jpg',
   colorMode: 'rgb',
-  quality: 90,
+  quality: 100,
   pageRangeMode: 'all',
   pageRangeText: '',
   renderDensity: 'standard',
   outputDirectory: '',
-  namingPattern: 'source-name-page',
-  collisionStrategy: 'rename'
+  namingPattern: 'source-name-index'
 };
 
 const buildStats = (items: ConversionItem[]): ConversionStats => ({
@@ -79,10 +79,24 @@ export const useConversionStore = create<ConversionStore>((set, get) => ({
       stats: buildStats(items)
     }),
   selectItem: (id) => set({ selectedItemId: id }),
+  toggleItemSelected: (id) =>
+    set((state) => {
+      const items = state.items.map((item) => (item.id === id ? { ...item, selected: !item.selected } : item));
+      return { items, stats: buildStats(items) };
+    }),
   updateGlobalSettings: (partial) =>
-    set((state) => ({
-      globalSettings: { ...state.globalSettings, ...partial }
-    })),
+    set((state) => {
+      const items = state.items.map((item): ConversionItem =>
+        item.status === 'success' || item.status === 'failed'
+          ? { ...item, status: 'ready', errorMessage: null, outputPaths: [] }
+          : item
+      );
+      return {
+        globalSettings: { ...state.globalSettings, ...partial },
+        items,
+        stats: buildStats(items)
+      };
+    }),
   updateItemOverride: (id, partial) =>
     set((state) => ({
       items: state.items.map((item) =>
