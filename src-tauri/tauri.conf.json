@@ -13,7 +13,7 @@
     "security": {
       "assetProtocol": {
         "enable": true,
-        "scope": ["$TEMP/imageasy/**", "$EXE/../cache/**"]
+        "scope": ["**"]
       }
     },
     "windows": [

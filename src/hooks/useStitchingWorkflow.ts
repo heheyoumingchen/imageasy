@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react';
+import { convertFileSrc } from '@tauri-apps/api/core';
 import { useDragDropImport } from './useDragDropImport';
 import { openDirectoryInSystem, openStitchingSources } from '../services/fileDialog';
 import { inspectStitchingDirectory, inspectStitchingFile, stitchImageFiles } from '../services/stitchingCommands';
@@ -11,7 +12,7 @@ import type { InspectStitchingFileResult, StitchingCanvasImage, StitchingResolut
 const createCanvasImage = (result: InspectStitchingFileResult): StitchingCanvasImage => ({
   path: result.sourcePath,
   name: result.sourceName,
-  preview: result.thumbnail ?? undefined,
+  preview: convertFileSrc(result.sourcePath),
   metadata: result.imageMetadata,
   scale: 1,
   offsetX: 0,
