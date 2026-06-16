@@ -1,15 +1,13 @@
 use anyhow::{Context, Result};
+use base64::{engine::general_purpose::STANDARD, Engine as _};
 use image::{codecs::jpeg::JpegEncoder, imageops, imageops::FilterType, DynamicImage, GenericImageView, ImageBuffer, Rgb, Rgba};
 use jpeg_decoder::Decoder as JpegDecoder;
 use std::{
     collections::HashMap,
     fs,
-    io::BufReader,
+    io::{BufReader, Cursor},
     path::{Path, PathBuf},
-    sync::{
-        atomic::{AtomicU64, Ordering},
-        Mutex,
-    },
+    sync::Mutex,
     time::UNIX_EPOCH,
 };
 
@@ -18,8 +16,6 @@ use super::{
     GenerateImagePreviewRequest, GenerateImagePreviewResult, PrefetchImagePreviewRequest,
     PREVIEW_CACHE,
 };
-
-static ADJUSTED_PREVIEW_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 #[tauri::command]
 pub async fn generate_image_preview(request: GenerateImagePreviewRequest) -> Result<GenerateImagePreviewResult, String> {
@@ -146,18 +142,13 @@ fn default_preview_file_path(path: &str, width: u32, height: u32) -> Result<Path
     Ok(cache_dir.join(file_name))
 }
 
-/// 为带调整参数的预览生成唯一文件路径。
-fn adjusted_preview_file_path(path: &str, width: u32, height: u32) -> Result<PathBuf> {
-    let cache_key = preview_cache_key(path, width, height)?;
-    let hash = super::simple_hash(&cache_key);
-    let stem = Path::new(path)
-        .file_stem()
-        .and_then(|s| s.to_str())
-        .unwrap_or("preview");
-    let counter = ADJUSTED_PREVIEW_COUNTER.fetch_add(1, Ordering::Relaxed);
-    let file_name = format!("{stem}_{hash}_adj_{counter}.jpg");
-    let cache_dir = super::editor_preview_cache_dir();
-    Ok(cache_dir.join(file_name))
+/// 为带调整参数的预览生成 base64 data URL（跳过磁盘 I/O）。
+fn encode_preview_to_data_url(image: &DynamicImage) -> Result<String> {
+    let mut buffer = Cursor::new(Vec::new());
+    let mut encoder = JpegEncoder::new_with_quality(&mut buffer, 75);
+    encoder.encode_image(image)?;
+    let encoded = STANDARD.encode(buffer.into_inner());
+    Ok(format!("data:image/jpeg;base64,{encoded}"))
 }
 
 fn write_preview_jpeg(path: &Path, image: &DynamicImage) -> Result<()> {
@@ -173,39 +164,6 @@ fn write_preview_jpeg(path: &Path, image: &DynamicImage) -> Result<()> {
     Ok(())
 }
 
-/// 清理同一源图的旧 adjusted 预览文件，保留最新的 max_keep 个。
-fn cleanup_old_adjusted_previews(path: &str, width: u32, height: u32, max_keep: usize) {
-    let Ok(cache_key) = preview_cache_key(path, width, height) else { return };
-    let hash = super::simple_hash(&cache_key);
-    let stem = Path::new(path)
-        .file_stem()
-        .and_then(|s| s.to_str())
-        .unwrap_or("preview");
-    let prefix = format!("{stem}_{hash}_adj_");
-    let cache_dir = super::editor_preview_cache_dir();
-
-    let Ok(entries) = fs::read_dir(&cache_dir) else { return };
-    let mut adjusted_files: Vec<_> = entries
-        .filter_map(|e| e.ok())
-        .filter(|e| {
-            e.file_name()
-                .to_str()
-                .map(|name| name.starts_with(&prefix) && name.ends_with(".jpg"))
-                .unwrap_or(false)
-        })
-        .collect();
-
-    if adjusted_files.len() <= max_keep {
-        return;
-    }
-
-    adjusted_files.sort_by_key(|e| e.metadata().and_then(|m| m.modified()).unwrap_or(UNIX_EPOCH));
-    let to_remove = adjusted_files.len() - max_keep;
-    for entry in adjusted_files.into_iter().take(to_remove) {
-        let _ = fs::remove_file(entry.path());
-    }
-}
-
 // ─── 预览生成主逻辑 ─────────────────────────────────────────────────────────────
 
 fn generate_image_preview_impl(request: GenerateImagePreviewRequest) -> Result<GenerateImagePreviewResult> {
@@ -219,7 +177,8 @@ fn generate_image_preview_impl(request: GenerateImagePreviewRequest) -> Result<G
             let dimensions = image::image_dimensions(&cached_path)
                 .with_context(|| format!("无法读取缓存预览尺寸: {}", cached_path.display()))?;
             return Ok(GenerateImagePreviewResult {
-                preview_path: cached_path.to_string_lossy().into_owned(),
+                preview_path: Some(cached_path.to_string_lossy().into_owned()),
+                data_url: None,
                 width: dimensions.0,
                 height: dimensions.1,
             });
@@ -230,7 +189,8 @@ fn generate_image_preview_impl(request: GenerateImagePreviewRequest) -> Result<G
     let prepared = get_or_prepare_preview_image(&request.path, preview_width, preview_height)?;
 
     // 应用调整参数
-    let processed = if is_identity_adjustments(&request.adjustments) {
+    let is_identity = is_identity_adjustments(&request.adjustments);
+    let processed = if is_identity {
         prepared
     } else {
         apply_adjustments(prepared, &request.adjustments)
@@ -238,23 +198,26 @@ fn generate_image_preview_impl(request: GenerateImagePreviewRequest) -> Result<G
 
     let (width, height) = processed.dimensions();
 
-    // 写入磁盘
-    let output_path = if is_identity_adjustments(&request.adjustments) {
+    if is_identity {
+        // 默认预览：写磁盘缓存，返回路径
         let p = default_preview_file_path(&request.path, preview_width, preview_height)?;
         write_preview_jpeg(&p, &processed)?;
-        p
+        Ok(GenerateImagePreviewResult {
+            preview_path: Some(p.to_string_lossy().into_owned()),
+            data_url: None,
+            width,
+            height,
+        })
     } else {
-        cleanup_old_adjusted_previews(&request.path, preview_width, preview_height, 3);
-        let p = adjusted_preview_file_path(&request.path, preview_width, preview_height)?;
-        write_preview_jpeg(&p, &processed)?;
-        p
-    };
-
-    Ok(GenerateImagePreviewResult {
-        preview_path: output_path.to_string_lossy().into_owned(),
-        width,
-        height,
-    })
+        // 调整预览：直接 base64 返回，跳过磁盘 I/O
+        let data_url = encode_preview_to_data_url(&processed)?;
+        Ok(GenerateImagePreviewResult {
+            preview_path: None,
+            data_url: Some(data_url),
+            width,
+            height,
+        })
+    }
 }
 
 fn get_or_prepare_preview_image(path: &str, width: u32, height: u32) -> Result<DynamicImage> {

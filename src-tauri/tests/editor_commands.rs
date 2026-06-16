@@ -1,5 +1,6 @@
 use std::path::PathBuf;
 
+use base64::Engine as _;
 use image::{GenericImageView, ImageBuffer, Rgba};
 use tempfile::tempdir;
 
@@ -96,9 +97,9 @@ fn generate_image_preview_returns_preview_file_path() {
     })
     .unwrap();
 
-    let preview_path = PathBuf::from(&preview.preview_path);
-    assert!(preview_path.exists(), "预览文件应该存在: {}", preview.preview_path);
-    assert!(preview.preview_path.ends_with(".jpg"));
+    assert!(preview.data_url.is_some(), "调整预览应返回 data_url");
+    assert!(preview.preview_path.is_none(), "调整预览不应写磁盘");
+    assert!(preview.data_url.as_ref().unwrap().starts_with("data:image/jpeg;base64,"));
     assert!(preview.width > 0);
     assert!(preview.height > 0);
 }
@@ -127,9 +128,11 @@ fn prefetch_image_preview_uses_the_same_async_command_path_as_main_preview() {
     })
     .unwrap();
 
-    let preview_path = PathBuf::from(&preview.preview_path);
+    assert!(preview.preview_path.is_some(), "默认预览应写磁盘");
+    assert!(preview.data_url.is_none(), "默认预览不应返回 data_url");
+    let preview_path = PathBuf::from(preview.preview_path.as_ref().unwrap());
     assert!(preview_path.exists(), "预览文件应该存在");
-    assert!(preview.preview_path.ends_with(".jpg"));
+    assert!(preview.preview_path.as_ref().unwrap().ends_with(".jpg"));
     assert!(preview.width > 0);
     assert!(preview.height > 0);
     assert!(preview.width <= 760);
@@ -223,8 +226,13 @@ fn warm_filter_changes_preview_pixels() {
     })
     .unwrap();
 
-    let neutral_image = image::open(&neutral.preview_path).unwrap();
-    let warm_image = image::open(&warm.preview_path).unwrap();
+    // neutral 是默认预览（磁盘文件），warm 是调整预览（base64）
+    let neutral_image = image::open(neutral.preview_path.as_ref().unwrap()).unwrap();
+    let warm_data_url = warm.data_url.as_ref().unwrap();
+    assert!(warm_data_url.starts_with("data:image/jpeg;base64,"));
+    let warm_base64 = warm_data_url.strip_prefix("data:image/jpeg;base64,").unwrap();
+    let warm_bytes = base64::engine::general_purpose::STANDARD.decode(warm_base64).unwrap();
+    let warm_image = image::load_from_memory(&warm_bytes).unwrap();
 
     let neutral_pixel = neutral_image.get_pixel(0, 0).0;
     let warm_pixel = warm_image.get_pixel(0, 0).0;
@@ -262,8 +270,12 @@ fn temperature_and_tint_change_preview_pixels() {
     })
     .unwrap();
 
-    let neutral_image = image::open(&neutral.preview_path).unwrap();
-    let adjusted_image = image::open(&adjusted.preview_path).unwrap();
+    // neutral 是默认预览（磁盘），adjusted 是调整预览（base64）
+    let neutral_image = image::open(neutral.preview_path.as_ref().unwrap()).unwrap();
+    let adjusted_data_url = adjusted.data_url.as_ref().unwrap();
+    let adjusted_base64 = adjusted_data_url.strip_prefix("data:image/jpeg;base64,").unwrap();
+    let adjusted_bytes = base64::engine::general_purpose::STANDARD.decode(adjusted_base64).unwrap();
+    let adjusted_image = image::load_from_memory(&adjusted_bytes).unwrap();
 
     assert_ne!(adjusted_image.get_pixel(0, 0).0, neutral_image.get_pixel(0, 0).0);
 }
@@ -327,8 +339,12 @@ fn sepia_filter_changes_preview_pixels() {
     })
     .unwrap();
 
-    let neutral_image = image::open(&neutral.preview_path).unwrap();
-    let sepia_image = image::open(&sepia.preview_path).unwrap();
+    // neutral 是默认预览（磁盘），sepia 是调整预览（base64）
+    let neutral_image = image::open(neutral.preview_path.as_ref().unwrap()).unwrap();
+    let sepia_data_url = sepia.data_url.as_ref().unwrap();
+    let sepia_base64 = sepia_data_url.strip_prefix("data:image/jpeg;base64,").unwrap();
+    let sepia_bytes = base64::engine::general_purpose::STANDARD.decode(sepia_base64).unwrap();
+    let sepia_image = image::load_from_memory(&sepia_bytes).unwrap();
 
     assert_ne!(sepia_image.get_pixel(0, 0).0, neutral_image.get_pixel(0, 0).0);
 }

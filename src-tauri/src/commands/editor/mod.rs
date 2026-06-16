@@ -8,7 +8,8 @@ pub use save::save_image_as_jpg;
 
 use anyhow::{Context, Result};
 use base64::{engine::general_purpose::STANDARD, Engine as _};
-use image::{codecs::jpeg::JpegEncoder, imageops::FilterType, DynamicImage, Rgba};
+use image::{codecs::jpeg::JpegEncoder, imageops::FilterType, DynamicImage, ImageBuffer, Rgb, Rgba};
+use jpeg_decoder::Decoder as JpegDecoder;
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::{
@@ -102,7 +103,10 @@ pub struct PrefetchImagePreviewRequest {
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GenerateImagePreviewResult {
-    pub preview_path: String,
+    /// 磁盘缓存路径（默认预览使用，前端通过 convertFileSrc 转为 asset URL）
+    pub preview_path: Option<String>,
+    /// base64 data URL（调整预览使用，跳过磁盘 I/O 直接返回）
+    pub data_url: Option<String>,
     pub width: u32,
     pub height: u32,
 }
@@ -289,8 +293,19 @@ fn create_thumbnail_data_url(path: &Path, size: u32, quality: u8) -> Result<Stri
         }
     }
 
-    let image = image::open(path).with_context(|| format!("无法打开缩略图源文件: {}", path.display()))?;
-    let thumbnail = image.resize(size, size, FilterType::Nearest);
+    // JPEG 使用 DCT 快速降采样解码，非 JPEG 使用完整解码
+    let extension = path.extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("")
+        .to_ascii_lowercase();
+
+    let thumbnail = if matches!(extension.as_str(), "jpg" | "jpeg") {
+        fast_decode_jpeg_thumbnail(path, size)?
+    } else {
+        let image = image::open(path).with_context(|| format!("无法打开缩略图源文件: {}", path.display()))?;
+        image.resize(size, size, FilterType::Nearest)
+    };
+
     let mut buffer = Cursor::new(Vec::new());
     let mut encoder = JpegEncoder::new_with_quality(&mut buffer, quality);
     encoder.encode_image(&thumbnail)?;
@@ -304,6 +319,52 @@ fn create_thumbnail_data_url(path: &Path, size: u32, quality: u8) -> Result<Stri
 
     let encoded = STANDARD.encode(&jpeg_bytes);
     Ok(format!("data:image/jpeg;base64,{encoded}"))
+}
+
+/// JPEG 缩略图快速解码：利用 DCT 缩放因子直接产出小图。
+fn fast_decode_jpeg_thumbnail(path: &Path, size: u32) -> Result<DynamicImage> {
+    let file = fs::File::open(path)
+        .with_context(|| format!("无法打开 JPEG: {}", path.display()))?;
+    let mut decoder = JpegDecoder::new(std::io::BufReader::new(file));
+
+    decoder.read_info()
+        .with_context(|| format!("无法读取 JPEG 头部: {}", path.display()))?;
+
+    // 设置目标尺寸，解码器自动选择最优 DCT 缩放因子（1/8 最快）
+    let scale = size.min(u16::MAX as u32) as u16;
+    decoder.scale(scale, scale)
+        .with_context(|| format!("无法设置 JPEG 缩放: {}", path.display()))?;
+
+    let pixels = decoder.decode()
+        .with_context(|| format!("JPEG 解码失败: {}", path.display()))?;
+
+    let info = decoder.info().context("解码后信息不可用")?;
+    let (w, h) = (info.width as u32, info.height as u32);
+
+    let dynamic_image = match info.pixel_format {
+        jpeg_decoder::PixelFormat::RGB24 => {
+            let buffer = ImageBuffer::<Rgb<u8>, _>::from_raw(w, h, pixels)
+                .context("无法构建 RGB 图像缓冲")?;
+            DynamicImage::ImageRgb8(buffer)
+        }
+        jpeg_decoder::PixelFormat::L8 => {
+            let buffer = image::ImageBuffer::<image::Luma<u8>, _>::from_raw(w, h, pixels)
+                .context("无法构建灰度图像缓冲")?;
+            DynamicImage::ImageLuma8(buffer)
+        }
+        _ => {
+            let image = image::open(path)
+                .with_context(|| format!("无法打开图片: {}", path.display()))?;
+            image.resize(size, size, FilterType::Nearest)
+        }
+    };
+
+    // 如果解码后仍大于目标尺寸，做最终 resize
+    if w > size || h > size {
+        Ok(dynamic_image.resize(size, size, FilterType::Nearest))
+    } else {
+        Ok(dynamic_image)
+    }
 }
 
 pub(crate) fn read_image_summary(path: &Path) -> Result<EditorImageSummary> {

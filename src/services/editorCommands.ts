@@ -20,7 +20,7 @@ export const generateImagePreview = async (request: GenerateImagePreviewRequest)
   const result = await invoke<GenerateImagePreviewResult>('generate_image_preview', { request });
   return {
     ...result,
-    previewUrl: convertFileSrc(result.previewPath)
+    previewUrl: result.dataUrl ?? (result.previewPath ? convertFileSrc(result.previewPath) : null)
   };
 };
 

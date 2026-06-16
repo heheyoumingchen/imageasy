@@ -82,6 +82,7 @@ const destructiveCropFixture = {
 
 const previewFixture = {
   previewPath: 'C:/temp/imageasy/editor-previews/preview_a.jpg',
+  dataUrl: null,
   previewUrl: 'asset://localhost/C:/temp/imageasy/editor-previews/preview_a.jpg',
   width: 720,
   height: 540

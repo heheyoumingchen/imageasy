@@ -277,9 +277,9 @@ fn inside_rounded_rect(x: u32, y: u32, width: u32, height: u32, radius: u32) -> 
     }
 }
 
-// 在 contain（完整适配、留白）基础上应用缩放与自由位移。
-// scale>=1 放大图片；offset_x/offset_y 以方格尺寸的比例（-1~1）自由平移，
-// 空出区域保持透明，露出画布背景色，与前端预览语义一致。
+// 在 cover（等比铺满、裁剪超出）基础上应用缩放与自由位移。
+// 默认 scale=1 时图片等比铺满方格（短边贴合，长边裁剪），与前端 object-cover 一致。
+// scale>1 进一步放大；offset_x/offset_y 以方格尺寸的比例平移调整可视区域。
 fn object_contain_transform(
     image: &DynamicImage,
     target_width: u32,
@@ -292,11 +292,12 @@ fn object_contain_transform(
     let offset_x = offset_x.clamp(-1.0, 1.0);
     let offset_y = offset_y.clamp(-1.0, 1.0);
 
-    let contain_scale = (target_width as f32 / image.width() as f32)
-        .min(target_height as f32 / image.height() as f32)
+    // cover: 使用 max 使短边贴合，长边超出后裁剪
+    let cover_scale = (target_width as f32 / image.width() as f32)
+        .max(target_height as f32 / image.height() as f32)
         * scale;
-    let resize_width = ((image.width() as f32 * contain_scale).round() as u32).max(1);
-    let resize_height = ((image.height() as f32 * contain_scale).round() as u32).max(1);
+    let resize_width = ((image.width() as f32 * cover_scale).round() as u32).max(1);
+    let resize_height = ((image.height() as f32 * cover_scale).round() as u32).max(1);
     let resized = image.resize_exact(resize_width, resize_height, FilterType::Lanczos3);
 
     // 透明底图，居中放置后按 offset 比例平移；越界部分由 overlay 自动裁剪。

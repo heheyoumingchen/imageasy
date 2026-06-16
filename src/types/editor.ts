@@ -76,7 +76,8 @@ export type GenerateImagePreviewRequest = {
 };
 
 export type GenerateImagePreviewResult = {
-  previewPath: string;
+  previewPath: string | null;
+  dataUrl: string | null;
   width: number;
   height: number;
 };
