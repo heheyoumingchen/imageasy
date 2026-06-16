@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import SplitImagePage from '../../src/pages/SplitImagePage';
@@ -52,14 +52,15 @@ describe('SplitImagePage', () => {
       language: 'zh-CN',
       maxConcurrency: 2,
       outputDirectoryStrategy: 'same-as-source',
-      splitting: { namingPattern: 'source-name-index', outputFormat: 'png', quality: 100 }
+      exportSettings: { namingPattern: 'source-name-index', outputFormat: 'png', colorMode: 'rgb', quality: 100 }
     });
   });
 
   it('renders splitting workspace layout', () => {
     render(<SplitImagePage />);
 
-    expect(screen.getByText('文件列表')).toBeInTheDocument();
+    // "文件列表"标题已按需求移除。
+    expect(screen.queryByText('文件列表')).not.toBeInTheDocument();
     expect(screen.getByRole('heading', { name: '图片分割' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '添加文件' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '清空列表' })).toBeInTheDocument();
@@ -70,7 +71,9 @@ describe('SplitImagePage', () => {
     expect(screen.getByRole('button', { name: '网格分割' })).toBeInTheDocument();
     expect(screen.queryByLabelText('导出格式')).not.toBeInTheDocument();
     expect(screen.queryByRole('slider', { name: /图片质量/ })).not.toBeInTheDocument();
-    expect(screen.getByText('全局进度')).toBeInTheDocument();
+    // 底部状态栏（总数/成功/失败/进行中/全局进度/错误详情/重试）已按需求移除。
+    expect(screen.queryByText('全局进度')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '打开输出目录' })).toBeDisabled();
   });
 
   it('imports files and folders and defaults output directory', async () => {
@@ -87,7 +90,8 @@ describe('SplitImagePage', () => {
     expect(inspectSplittingDirectory).toHaveBeenCalledWith('F:/demo/docs');
     expect(await screen.findByText('a.jpg')).toBeInTheDocument();
     expect(screen.getByText('manual.pdf')).toBeInTheDocument();
-    await waitFor(() => expect(screen.getByText('F:/demo/docs')).toBeInTheDocument());
+    // 输出目录不再展示在底部状态栏；以「打开输出目录」按钮变为可用来体现已推断目录。
+    await waitFor(() => expect(screen.getByRole('button', { name: '打开输出目录' })).toBeEnabled());
   });
 
   it('starts horizontal splitting with selected grid settings', async () => {
@@ -95,7 +99,7 @@ describe('SplitImagePage', () => {
     vi.mocked(openSplittingSources).mockResolvedValue({ files: ['F:/demo/a.jpg'], directories: [], cancelled: false });
     vi.mocked(inspectSplittingFile).mockResolvedValue(imageInfo);
     vi.mocked(splitImageFile).mockResolvedValue({ outputPaths: ['F:/demo/a-001.webp', 'F:/demo/a-002.webp', 'F:/demo/a-003.webp'], splitCount: 3, skippedCount: 0 });
-    getSettingsStore().setState({ splitting: { namingPattern: 'source-name-index', outputFormat: 'webp', quality: 80 } });
+    getSettingsStore().setState({ exportSettings: { namingPattern: 'source-name-index', outputFormat: 'webp', colorMode: 'rgb', quality: 80 } });
 
     render(<SplitImagePage />);
     await user.click(screen.getByRole('button', { name: '添加文件' }));
@@ -108,10 +112,12 @@ describe('SplitImagePage', () => {
       sourcePath: 'F:/demo/a.jpg',
       outputDirectory: 'F:/demo',
       outputFormat: 'webp',
+      colorMode: 'rgb',
       columns: 3,
       rows: 1,
       quality: 80,
-      namingPattern: 'source-name-index'
+      namingPattern: 'source-name-index',
+      includeOutputPaths: false
     }));
     expect(await screen.findByText('完成 3 张')).toBeInTheDocument();
   });
@@ -133,10 +139,12 @@ describe('SplitImagePage', () => {
       sourcePath: 'F:/demo/a.jpg',
       outputDirectory: 'F:/demo',
       outputFormat: 'png',
+      colorMode: 'rgb',
       columns: 1,
       rows: 4,
       quality: 100,
-      namingPattern: 'source-name-index'
+      namingPattern: 'source-name-index',
+      includeOutputPaths: false
     }));
     expect(await screen.findByText('完成 4 张')).toBeInTheDocument();
   });
@@ -159,35 +167,32 @@ describe('SplitImagePage', () => {
       sourcePath: 'F:/demo/a.jpg',
       outputDirectory: 'F:/demo',
       outputFormat: 'png',
+      colorMode: 'rgb',
       columns: 3,
       rows: 2,
       quality: 100,
-      namingPattern: 'source-name-index'
+      namingPattern: 'source-name-index',
+      includeOutputPaths: false
     }));
     expect(await screen.findByText('完成 6 张')).toBeInTheDocument();
   });
 
-  it('shows failed details and retries failed items', async () => {
+  it('surfaces the failure message inline on the list row', async () => {
     const user = userEvent.setup();
     vi.mocked(openSplittingSources).mockResolvedValue({ files: ['F:/demo/a.jpg'], directories: [], cancelled: false });
     vi.mocked(inspectSplittingFile).mockResolvedValue(imageInfo);
-    vi.mocked(splitImageFile)
-      .mockRejectedValueOnce(new Error('图片尺寸过小'))
-      .mockResolvedValueOnce({ outputPaths: ['F:/demo/a-001.jpg', 'F:/demo/a-002.jpg'], splitCount: 2, skippedCount: 0 });
+    vi.mocked(splitImageFile).mockRejectedValueOnce(new Error('图片尺寸过小'));
 
     render(<SplitImagePage />);
     await user.click(screen.getByRole('button', { name: '添加文件' }));
     await screen.findByText('a.jpg');
     await user.click(screen.getByRole('button', { name: '分割图片' }));
 
+    // 失败状态与错误信息直接呈现在列表行内，不再有错误详情弹窗与重试按钮。
     await waitFor(() => expect(screen.getAllByText('失败').length).toBeGreaterThan(0));
-    await user.click(screen.getByRole('button', { name: '错误详情' }));
     expect((await screen.findAllByText('图片尺寸过小')).length).toBeGreaterThan(0);
-    await user.click(screen.getByRole('button', { name: '关闭' }));
-    await user.click(screen.getByRole('button', { name: '重试失败项' }));
-    await user.click(screen.getByRole('button', { name: '分割图片' }));
-
-    await waitFor(() => expect(splitImageFile).toHaveBeenCalledTimes(2));
+    expect(screen.queryByRole('button', { name: '错误详情' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '重试失败项' })).not.toBeInTheDocument();
   });
 
   it('re-renders splitting copy when language changes', async () => {
@@ -199,7 +204,6 @@ describe('SplitImagePage', () => {
     });
 
     await waitFor(() => expect(screen.getByRole('button', { name: 'Split Image' })).toBeInTheDocument());
-    const footer = screen.getByRole('contentinfo', { name: 'Splitting task footer' });
-    expect(within(footer).getByText((_, element) => element?.tagName === 'SPAN' && element.textContent === 'Current task: Image splitting')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '分割图片' })).not.toBeInTheDocument();
   });
 });

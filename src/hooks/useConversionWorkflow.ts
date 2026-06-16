@@ -9,15 +9,19 @@ import { useDragDropImport } from './useDragDropImport';
 import { openConversionSources, openConversionFiles, chooseOutputDirectory, openDirectoryInSystem } from '../services/fileDialog';
 import { getSettingsStore } from './useSettingsStore';
 import { useConversionStore } from '../stores/conversionStore';
-import type { ConversionTaskSettings } from '../stores/settingsStore';
-import type { ConversionItem, ConversionOutputFormat, ConversionOutputSettings, InspectConversionFileResult } from '../types/conversion';
+import type { ConversionItem, ConversionOutputFormat, ConversionColorMode, ConversionOutputSettings, InspectConversionFileResult } from '../types/conversion';
 import { expandPageRange } from '../utils/pageRange';
 import { sourceDirectory } from '../utils/paths';
 import { toErrorMessage } from '../utils/errors';
 import { runConcurrentQueue } from '../utils/batchQueue';
 
-// 转换专属参数（来自 conversionStore）与公共任务设置（来自 settings store）合并后的批次快照。
-type ConversionBatchSettings = ConversionOutputSettings & ConversionTaskSettings;
+// 转换专属参数（来自 conversionStore）与公共导出设置（来自 exportSettings）合并后的批次快照。
+type ConversionBatchSettings = ConversionOutputSettings & {
+  namingPattern: 'source-name-index' | 'source-name-date';
+  outputFormat: ConversionOutputFormat;
+  colorMode: ConversionColorMode;
+  quality: number;
+};
 
 const toItem = (result: InspectConversionFileResult): ConversionItem => ({
   id: `${result.sourcePath}:${result.kind}`,
@@ -107,8 +111,8 @@ export const useConversionWorkflow = () => {
     const sourceFiles = [...sources.files, ...fallbackFiles];
     const fileItems = await Promise.all(sourceFiles.map((path) => inspectConversionFile(path)));
     const directoryItemGroups = await Promise.all(sources.directories.map((path) => inspectConversionDirectory(path)));
-    const supportedItems = [...fileItems, ...directoryItemGroups.flat()].filter((item) => item.kind !== 'unsupported');
-    setItems(supportedItems.map(toItem));
+    const supportedItems = [...fileItems, ...directoryItemGroups.flat()].filter((item) => item.kind !== 'unsupported').map(toItem);
+    setItems([...items, ...supportedItems.filter((item) => !items.some((current) => current.id === item.id))]);
 
     if (!globalSettings.outputDirectory && sources.directories[0]) {
       updateGlobalSettings({ outputDirectory: sources.directories[0] });
@@ -204,24 +208,18 @@ export const useConversionWorkflow = () => {
       return;
     }
 
-    // same-as-source 策略沿用从源推断的 outputDirectory；custom 策略下若目录为空则弹框让用户选。
+    // same-as-source 策略沿用从源推断的 outputDirectory；custom 策略使用设置页保存的固定默认目录。
     let outputDirectory = globalSettings.outputDirectory;
+    const settingsState = getSettingsStore().getState();
+    if (settingsState.outputDirectoryStrategy === 'custom') {
+      outputDirectory = settingsState.defaultOutputDirectory;
+    }
     if (!outputDirectory.trim()) {
-      if (getSettingsStore().getState().outputDirectoryStrategy !== 'custom') {
-        return;
-      }
-
-      const chosen = await chooseOutputDirectory();
-      if (!chosen) {
-        return;
-      }
-
-      updateGlobalSettings({ outputDirectory: chosen });
-      outputDirectory = chosen;
+      return;
     }
 
-    const conversion = getSettingsStore().getState().conversion;
-    const batchSettings: ConversionBatchSettings = { ...globalSettings, ...conversion, outputDirectory };
+    const exportSettings = settingsState.exportSettings;
+    const batchSettings: ConversionBatchSettings = { ...globalSettings, ...exportSettings, outputDirectory };
 
     for (const item of readyItems.filter((entry) => entry.kind === 'document')) {
       try {

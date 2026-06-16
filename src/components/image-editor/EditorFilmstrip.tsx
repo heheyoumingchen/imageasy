@@ -1,4 +1,6 @@
+import { useEffect, useRef, useState } from 'react';
 import type { EditorDirectoryImage } from '../../types/editor';
+import { generateEditorThumbnail } from '../../services/editorCommands';
 
 import { ChevronLeft, ChevronRight, Image as ImageIcon } from 'lucide-react';
 
@@ -50,6 +52,53 @@ const EditorFilmstrip = ({ images, currentIndex, canGoPrevious, canGoNext, isDis
 
   const visibleImages = getVisibleWindow(images, currentIndex, 6);
 
+  // 胶片栏缩略图按需懒加载：后端打开会话时不再一次性生成全部缩略图，
+  // 这里仅对当前可见且缺缩略图的项并行请求生成，并缓存到组件本地状态（不使用本地文件 URL）。
+  const [thumbnails, setThumbnails] = useState<Record<string, string>>({});
+  const requestedRef = useRef<Set<string>>(new Set());
+  const activeImagePathsRef = useRef<Set<string>>(new Set());
+
+  useEffect(() => {
+    activeImagePathsRef.current = new Set(images.map((image) => image.path));
+    requestedRef.current = new Set();
+    setThumbnails({});
+
+    return () => {
+      activeImagePathsRef.current = new Set();
+    };
+  }, [images]);
+
+  useEffect(() => {
+    const loadVisibleThumbnails = () => {
+      const missingImages = visibleImages.filter((image) => {
+        if (image.thumbnailDataUrl || thumbnails[image.path] || requestedRef.current.has(image.path)) {
+          return false;
+        }
+        requestedRef.current.add(image.path);
+        return true;
+      });
+
+      for (const image of missingImages) {
+        void generateEditorThumbnail(image.path)
+          .then((dataUrl) => {
+            if (!activeImagePathsRef.current.has(image.path)) {
+              requestedRef.current.delete(image.path);
+              return;
+            }
+            setThumbnails((current) => ({ ...current, [image.path]: dataUrl }));
+          })
+          .catch(() => {
+            requestedRef.current.delete(image.path);
+            // 单张缩略图失败不阻断其它项，占位图标继续显示；下次可见时允许重试。
+          });
+      }
+    };
+
+    loadVisibleThumbnails();
+    // visibleImages 由 images + currentIndex 推导；thumbnails 用于避免失败重试时重复请求已成功项。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [images, currentIndex, thumbnails]);
+
   return (
     <section aria-label={copy.regionLabel} className="min-w-0 bg-white rounded-lg border border-border-light p-2">
       <div className="flex min-w-0 items-center gap-3">
@@ -73,6 +122,7 @@ const EditorFilmstrip = ({ images, currentIndex, canGoPrevious, canGoNext, isDis
             <div className="flex gap-3 px-1 py-1">
               {visibleImages.map((image) => {
                 const active = image.index === currentIndex;
+                const thumbnailSrc = image.thumbnailDataUrl || thumbnails[image.path];
                 return (
                   <button
                     key={image.path}
@@ -85,11 +135,17 @@ const EditorFilmstrip = ({ images, currentIndex, canGoPrevious, canGoNext, isDis
                     title={image.name}
                   >
                     <div className="h-[74px] w-full overflow-hidden rounded bg-bg-main border border-black/5">
-                      <img
-                        src={image.thumbnailDataUrl}
-                        alt={copy.thumbnailAlt(image.name)}
-                        className={`h-full w-full object-cover transition-transform duration-500 ${active ? 'scale-110' : 'group-hover:scale-110'}`}
-                      />
+                      {thumbnailSrc ? (
+                        <img
+                          src={thumbnailSrc}
+                          alt={copy.thumbnailAlt(image.name)}
+                          className={`h-full w-full object-cover transition-transform duration-500 ${active ? 'scale-110' : 'group-hover:scale-110'}`}
+                        />
+                      ) : (
+                        <div className="flex h-full w-full items-center justify-center bg-[#F3F4F8] text-[#C5CAD3]">
+                          <ImageIcon size={20} />
+                        </div>
+                      )}
                     </div>
                   </button>
                 );

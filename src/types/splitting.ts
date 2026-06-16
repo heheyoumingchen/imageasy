@@ -24,14 +24,18 @@ export type InspectSplittingFileResult = {
   errorMessage: string | null;
 };
 
+export type SplittingColorMode = 'rgb' | 'cmyk' | 'gray-cmyk';
+
 export type SplitImageFileRequest = {
   sourcePath: string;
   outputDirectory: string;
   outputFormat: SplittingOutputFormat;
+  colorMode: SplittingColorMode;
   columns: number;
   rows: number;
   quality: number;
   namingPattern: SplittingNamingPattern;
+  includeOutputPaths?: boolean;
 };
 
 export type SplitImageFileResult = {

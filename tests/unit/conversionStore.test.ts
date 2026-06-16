@@ -36,7 +36,7 @@ const readyDocument = {
 describe('conversionStore', () => {
   beforeEach(() => {
     useConversionStore.getState().reset();
-    getSettingsStore().setState({ conversion: { ...DEFAULT_SETTINGS.conversion } });
+    getSettingsStore().setState({ exportSettings: { ...DEFAULT_SETTINGS.exportSettings } });
   });
 
   it('hydrates new items and selects the first supported one', () => {
@@ -49,7 +49,7 @@ describe('conversionStore', () => {
   it('reads output format and color mode from settings store for document summaries', () => {
     useConversionStore.getState().setItems([readyDocument]);
     getSettingsStore().setState({
-      conversion: { ...DEFAULT_SETTINGS.conversion, outputFormat: 'png', colorMode: 'gray-cmyk' }
+      exportSettings: { ...DEFAULT_SETTINGS.exportSettings, outputFormat: 'png', colorMode: 'gray-cmyk' }
     });
     useConversionStore.getState().updateGlobalSettings({ pageRangeMode: 'all', pageRangeText: '' });
 
@@ -58,11 +58,11 @@ describe('conversionStore', () => {
 
   it('supports single-item page-range overrides without changing the batch color mode', () => {
     useConversionStore.getState().setItems([readyDocument]);
-    getSettingsStore().setState({ conversion: { ...DEFAULT_SETTINGS.conversion, colorMode: 'cmyk' } });
+    getSettingsStore().setState({ exportSettings: { ...DEFAULT_SETTINGS.exportSettings, colorMode: 'cmyk' } });
     useConversionStore.getState().updateItemOverride('b', { pageRangeMode: 'custom', pageRangeText: '2-4' });
 
     expect(useConversionStore.getState().buildEffectiveDocumentPages('b')).toEqual([2, 3, 4]);
-    expect(getSettingsStore().getState().conversion.colorMode).toBe('cmyk');
+    expect(getSettingsStore().getState().exportSettings.colorMode).toBe('cmyk');
   });
 
   it('aggregates batch progress from per-item statuses', () => {

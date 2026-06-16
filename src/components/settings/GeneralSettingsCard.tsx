@@ -1,5 +1,5 @@
 import type { CSSProperties } from 'react';
-import type { OutputDirectoryStrategy, PersistedSettings } from '../../stores/settingsStore';
+import type { PersistedSettings } from '../../stores/settingsStore';
 
 const buildSliderStyle = (value: number, min: number, max: number): CSSProperties => {
   const ratio = ((value - min) / (max - min)) * 100;
@@ -16,39 +16,39 @@ type GeneralSettingsCardProps = {
     themeLight: string;
     language: string;
     maxConcurrency: string;
-    outputDirectoryStrategy: string;
-    sameAsSource: string;
-    custom: string;
-    editor: string;
-    rememberLastParams: string;
+    outputQuality: string;
+    cacheTitle: string;
+    cleanCache: string;
   };
   formState: PersistedSettings;
   isLoading: boolean;
+  cacheSizeText: string;
+  isClearingCache: boolean;
   onThemeChange: (theme: PersistedSettings['theme']) => void;
   onLanguageChange: (language: PersistedSettings['language']) => void;
   onMaxConcurrencyChange: (value: number) => void;
-  onOutputDirectoryStrategyChange: (value: OutputDirectoryStrategy) => void;
-  rememberLastParams: boolean;
-  onToggleRemember: () => void;
+  onOutputQualityChange: (value: number) => void;
+  onClearCache: () => void;
 };
 
 export const GeneralSettingsCard = ({
   copy,
   formState,
   isLoading,
+  cacheSizeText,
+  isClearingCache,
   onThemeChange,
   onLanguageChange,
   onMaxConcurrencyChange,
-  onOutputDirectoryStrategyChange,
-  rememberLastParams,
-  onToggleRemember
+  onOutputQualityChange,
+  onClearCache
 }: GeneralSettingsCardProps) => (
-  <section className="bg-white rounded border border-border-light px-8 py-5">
-    <h2 className="text-xl font-bold text-[#1A1D23] mb-2 flex items-center gap-3">
+  <section className="px-8 py-5">
+    <h2 className="text-title-2 mb-2 flex items-center gap-3">
       <div className="w-1.5 h-6 bg-meitu rounded-full" />
       {copy.general}
     </h2>
-    <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
+    <div className="grid grid-cols-1 md:grid-cols-3 gap-8 items-stretch">
       {/* Column 1: Theme */}
       <div>
         <span className="block text-sm font-bold text-[#5D6472] mb-4">{copy.theme}</span>
@@ -121,7 +121,7 @@ export const GeneralSettingsCard = ({
           </button>
         </div>
       </div>
-      {/* Column 2: Concurrency + Output Strategy */}
+      {/* Column 2: Concurrency + Output Quality */}
       <div className="space-y-8">
         <label className="block">
           <div className="flex items-center justify-between mb-4">
@@ -146,28 +146,28 @@ export const GeneralSettingsCard = ({
         </label>
 
         <label className="block">
-          <span className="text-sm font-bold text-[#5D6472]">{copy.outputDirectoryStrategy}</span>
-          <div className="relative mt-3">
-            <select
-              aria-label={copy.outputDirectoryStrategy}
-              className="w-full h-10 rounded border border-border-light bg-[#FAFBFD] px-4 text-sm font-bold text-[#1A1D23] outline-none transition-all focus:border-meitu focus:ring-4 focus:ring-meitu/10 appearance-none cursor-pointer"
+          <div className="flex items-center justify-between mb-4">
+            <span className="text-sm font-bold text-[#5D6472]">{copy.outputQuality}</span>
+            <span className="text-xs font-bold text-meitu bg-meitu-light px-2.5 py-1 rounded-full tabular-nums">{formState.exportSettings.quality}%</span>
+          </div>
+          <div className="flex max-w-[280px] items-center gap-6">
+            <input
+              aria-label={copy.outputQuality}
+              type="range"
+              min="1"
+              max="100"
+              step="1"
+              className="w-full h-1.5 rounded-full cursor-pointer disabled:cursor-not-allowed disabled:opacity-50"
+              style={buildSliderStyle(formState.exportSettings.quality, 1, 100)}
+              value={formState.exportSettings.quality}
               disabled={isLoading}
-              value={formState.outputDirectoryStrategy}
-              onChange={(event) => onOutputDirectoryStrategyChange(event.target.value as OutputDirectoryStrategy)}
-            >
-              <option value="same-as-source">{copy.sameAsSource}</option>
-              <option value="custom">{copy.custom}</option>
-            </select>
-            <div className="absolute right-4 top-1/2 -translate-y-1/2 pointer-events-none text-[#8D93A1]">
-              <svg viewBox="0 0 20 20" fill="currentColor" className="w-5 h-5">
-                <path fillRule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z" clipRule="evenodd" />
-              </svg>
-            </div>
+              onChange={(event) => onOutputQualityChange(Number(event.target.value))}
+            />
           </div>
         </label>
       </div>
-      {/* Column 3: Language + Editor Preferences */}
-      <div className="space-y-8">
+      {/* Column 3: Language + Cache */}
+      <div className="flex flex-col gap-8">
         <label className="block">
           <span className="text-sm font-bold text-[#5D6472]">{copy.language}</span>
           <div className="relative mt-3">
@@ -194,20 +194,24 @@ export const GeneralSettingsCard = ({
           </div>
         </label>
 
-        <div data-testid="settings-editor-card">
-          <span className="block text-sm font-bold text-[#5D6472] mb-4">{copy.editor}</span>
-          <button
-            type="button"
-            aria-label={copy.rememberLastParams}
-            aria-pressed={rememberLastParams}
-            className="group flex w-full items-center justify-between rounded border border-border-light/50 bg-[#FAFBFD] px-5 py-4 text-left transition-all duration-300 hover:border-meitu/30 hover:bg-meitu-light/10 cursor-pointer"
-            onClick={onToggleRemember}
-          >
-            <span className="text-sm font-bold text-[#1A1D23] transition-colors group-hover:text-meitu">{copy.rememberLastParams}</span>
-            <div className={`w-11 h-6 rounded-full transition-colors duration-300 relative shrink-0 ml-3 ${rememberLastParams ? 'bg-meitu' : 'bg-[#E2E4E9]'}`}>
-              <div className={`absolute top-1 w-4 h-4 bg-white rounded-full shadow-md transition-all duration-300 ${rememberLastParams ? 'left-6' : 'left-1'}`} />
+        <div data-testid="settings-cache-card">
+          <span className="block text-sm font-bold text-[#5D6472] mb-4">{copy.cacheTitle}</span>
+          <div className="flex h-10 items-center justify-between gap-4 rounded border border-border-light bg-[#FAFBFD] px-4">
+            <div className="flex items-center gap-2.5 min-w-0">
+              <svg viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4 shrink-0 text-meitu">
+                <path d="M3.75 3A1.75 1.75 0 002 4.75v3.26a3.235 3.235 0 011.75-.51h12.5c.644 0 1.245.188 1.75.51V6.75A1.75 1.75 0 0016.25 5h-4.836a.25.25 0 01-.177-.073L9.823 3.513A1.75 1.75 0 008.586 3H3.75zM3.75 9A1.75 1.75 0 002 10.75v4.5c0 .966.784 1.75 1.75 1.75h12.5A1.75 1.75 0 0018 15.25v-4.5A1.75 1.75 0 0016.25 9H3.75z" />
+              </svg>
+              <span className="text-sm font-bold text-meitu tabular-nums">{cacheSizeText}</span>
             </div>
-          </button>
+            <button
+              type="button"
+              className="h-7 px-4 rounded border border-meitu bg-white text-[13px] font-bold text-meitu transition-all hover:bg-meitu-light active:scale-95 disabled:opacity-40"
+              disabled={isClearingCache}
+              onClick={onClearCache}
+            >
+              {copy.cleanCache}
+            </button>
+          </div>
         </div>
       </div>
     </div>

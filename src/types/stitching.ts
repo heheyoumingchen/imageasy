@@ -5,6 +5,7 @@ export type StitchingNamingPattern = 'source-name-index' | 'source-name-date';
 export type StitchingStatus = 'ready' | 'running' | 'success' | 'failed';
 export type StitchingResolution = 768 | 1080 | 1536 | 2160;
 export type StitchingQuality = number; // 0-100
+export type StitchingColorMode = 'rgb' | 'cmyk' | 'gray-cmyk';
 
 export type StitchingImageMetadata = {
   width: number;
@@ -17,6 +18,7 @@ export type InspectStitchingFileResult = {
   sourcePath: string;
   sourceName: string;
   imageMetadata: StitchingImageMetadata | null;
+  thumbnail: string | null;
   errorMessage: string | null;
 };
 
@@ -26,6 +28,9 @@ export type StitchLayoutCell = {
   col: number;
   rowSpan: number;
   colSpan: number;
+  scale: number;
+  offsetX: number;
+  offsetY: number;
 };
 
 export type StitchImageFilesRequest = {
@@ -39,6 +44,7 @@ export type StitchImageFilesRequest = {
   borderRadius: number;
   backgroundColor: string;
   quality: StitchingQuality;
+  colorMode: StitchingColorMode;
   outputDirectory: string;
   outputFormat: StitchingOutputFormat;
   namingPattern: StitchingNamingPattern;
@@ -60,4 +66,7 @@ export type StitchingCanvasImage = {
   name: string;
   preview?: string;
   metadata: StitchingImageMetadata | null;
+  scale: number;
+  offsetX: number;
+  offsetY: number;
 };

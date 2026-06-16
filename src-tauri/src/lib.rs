@@ -6,7 +6,9 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
             commands::editor::open_image_session,
+            commands::editor::generate_editor_thumbnail,
             commands::editor::filters::generate_image_preview,
+            commands::editor::filters::prefetch_image_preview,
             commands::editor::save::save_image_as_jpg,
             commands::editor::crop::commit_crop_to_working_image,
             commands::conversion::inspect_conversion_file,

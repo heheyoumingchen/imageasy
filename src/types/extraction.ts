@@ -15,7 +15,9 @@ export type ExtractDocumentImagesRequest = {
   outputDirectory: string;
   outputFormat: ExtractionOutputFormat;
   colorMode: ExtractionColorMode;
+  quality: number;
   namingPattern: ExtractionNamingPattern;
+  includeOutputPaths?: boolean;
 };
 
 export type ExtractDocumentImagesResult = {

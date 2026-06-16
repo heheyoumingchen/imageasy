@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useMemo } from 'react';
-import { Plus, Eraser, Play } from 'lucide-react';
+import { Plus, Eraser, FolderOpen } from 'lucide-react';
 import { useLanguage } from '../hooks/useLanguage';
 import { useStitchingWorkflow } from '../hooks/useStitchingWorkflow';
 import StitchingSettingsPanel from '../components/stitching/StitchingSettingsPanel';
@@ -23,6 +23,7 @@ const StitchImagePage = () => {
             clear: 'Clear',
             download: 'Download',
             downloading: 'Downloading...',
+            openOutputDirectory: 'Open output directory',
             layoutTemplates: 'Layout',
             stitchingSettings: 'Settings',
             exported: (path: string) => `Exported: ${path}`,
@@ -52,6 +53,7 @@ const StitchImagePage = () => {
             clear: '清空',
             download: '下载',
             downloading: '正在下载...',
+            openOutputDirectory: '打开输出目录',
             layoutTemplates: '布局模板',
             stitchingSettings: '拼接设置',
             exported: (path: string) => `已导出：${path}`,
@@ -87,13 +89,13 @@ const StitchImagePage = () => {
   return (
     <div className="flex flex-col h-full overflow-hidden bg-bg-main animate-in fade-in duration-500">
       {/* 顶部工具栏 */}
-      <div className="flex items-center justify-between px-6 py-4 border-b border-border-light/60 bg-white">
-        <h2 className="text-base font-bold text-[#1A1D23]">{copy.title}</h2>
+      <div className="flex items-center justify-between gap-6 px-6 py-4 border-b border-border-light/60 bg-white">
+        {/* 左侧：添加图片 + 清空（同样式） */}
         <div className="flex items-center gap-3">
           <button
             onClick={workflow.importImages}
             disabled={workflow.isRunning}
-            className="flex h-10 items-center gap-2 px-4 rounded-lg bg-meitu text-white text-[13px] font-bold hover:brightness-110 active:scale-95 transition-all disabled:opacity-50"
+            className="flex h-10 items-center gap-2 px-4 rounded-lg border border-border-light bg-white text-[#515867] text-[13px] font-bold hover:text-meitu hover:border-meitu transition-all disabled:opacity-50"
           >
             <Plus size={16} />
             {copy.addImages}
@@ -105,6 +107,30 @@ const StitchImagePage = () => {
           >
             <Eraser size={16} />
             {copy.clear}
+          </button>
+        </div>
+
+        {/* 右侧：下载 + 打开输出目录 */}
+        <div className="flex items-center gap-3">
+          <button
+            type="button"
+            className="flex h-10 items-center gap-2 px-5 rounded-lg bg-meitu text-white text-[13px] font-bold transition-all hover:brightness-110 active:scale-95 disabled:opacity-50 disabled:active:scale-100"
+            onClick={handleStartStitching}
+            disabled={!workflow.canStart}
+          >
+            {workflow.isRunning && (
+              <div className="h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent" />
+            )}
+            {workflow.isRunning ? copy.downloading : copy.download}
+          </button>
+          <button
+            type="button"
+            className="flex h-10 items-center gap-2 px-4 rounded-lg border border-border-light bg-white text-[#515867] text-[13px] font-bold hover:border-meitu hover:text-meitu transition-all disabled:opacity-50"
+            onClick={workflow.openOutputDirectory}
+            disabled={!workflow.outputDirectory}
+          >
+            <FolderOpen size={16} />
+            {copy.openOutputDirectory}
           </button>
         </div>
       </div>
@@ -139,6 +165,9 @@ const StitchImagePage = () => {
               onAddImage={workflow.importImageForCell}
               onRemoveImage={workflow.removeImage}
               onImportImages={workflow.importImages}
+              onSwapImages={workflow.swapImages}
+              onUpdateTransform={workflow.updateImageTransform}
+              onResetTransform={workflow.resetImageTransform}
             />
           </div>
         </div>
@@ -176,7 +205,7 @@ const StitchImagePage = () => {
           </div>
 
           {/* 面板内容区 */}
-          <div className="flex-1 overflow-y-scroll p-5 custom-scrollbar [scrollbar-gutter:stable]">
+          <div className="flex-1 overflow-y-auto p-5 custom-scrollbar [scrollbar-gutter:stable]">
             {activePanel === 'layout' ? (
               <LayoutSelector selectedTemplate={workflow.selectedTemplate} onSelectTemplate={workflow.selectTemplate} />
             ) : (
@@ -197,23 +226,6 @@ const StitchImagePage = () => {
                 onResolutionChange={workflow.setResolution}
               />
             )}
-          </div>
-
-          {/* 底部按钮 */}
-          <div className="p-5 border-t border-border-light/60">
-            <button
-              type="button"
-              className="w-full h-10 rounded-lg bg-meitu text-white font-bold text-sm transition-all hover:scale-[1.01] active:scale-[0.98] disabled:opacity-50 disabled:scale-100 flex items-center justify-center gap-2"
-              onClick={handleStartStitching}
-              disabled={!workflow.canStart}
-            >
-              {workflow.isRunning ? (
-                <div className="h-6 w-6 animate-spin rounded-full border-3 border-white border-t-transparent" />
-              ) : (
-                <Play size={24} fill="currentColor" />
-              )}
-              {workflow.isRunning ? copy.downloading : copy.download}
-            </button>
           </div>
         </aside>
       </div>

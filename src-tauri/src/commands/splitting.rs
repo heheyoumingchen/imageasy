@@ -1,10 +1,11 @@
 use super::{
-    common::{current_date_stamp, extension, normalized_format, write_dynamic_image},
-    pdf_rendering::render_pdf_pages,
+    common::{apply_color_mode, current_date_stamp, extension, normalized_format, write_dynamic_image},
+    pdf_rendering::render_pdf_pages_with_callback,
 };
 use anyhow::{Context, Result};
 use image::{DynamicImage, GenericImageView};
 use lopdf::Document as LoDocument;
+use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::{
     fs,
@@ -45,10 +46,13 @@ pub struct SplitImageFileRequest {
     pub source_path: String,
     pub output_directory: String,
     pub output_format: String,
+    pub color_mode: String,
     pub columns: u32,
     pub rows: u32,
     pub quality: u8,
     pub naming_pattern: String,
+    #[serde(default)]
+    pub include_output_paths: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -60,19 +64,31 @@ pub struct SplitImageFileResult {
 }
 
 #[tauri::command]
-pub fn inspect_splitting_file(path: String) -> Result<InspectSplittingFileResult, String> {
-    inspect_splitting_file_impl(&path).map_err(|error| error.to_string())
+pub async fn inspect_splitting_file(path: String) -> Result<InspectSplittingFileResult, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        inspect_splitting_file_impl(&path).map_err(|error| error.to_string())
+    })
+    .await
+    .map_err(|error| error.to_string())?
 }
 
 #[tauri::command]
-pub fn inspect_splitting_directory(path: String) -> Result<Vec<InspectSplittingFileResult>, String> {
-    inspect_splitting_directory_impl(&path).map_err(|error| error.to_string())
+pub async fn inspect_splitting_directory(path: String) -> Result<Vec<InspectSplittingFileResult>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        inspect_splitting_directory_impl(&path).map_err(|error| error.to_string())
+    })
+    .await
+    .map_err(|error| error.to_string())?
 }
 
 #[tauri::command]
-pub fn split_image_file(app: tauri::AppHandle, request: SplitImageFileRequest) -> Result<SplitImageFileResult, String> {
+pub async fn split_image_file(app: tauri::AppHandle, request: SplitImageFileRequest) -> Result<SplitImageFileResult, String> {
     let resource_dir = app.path().resource_dir().ok();
-    split_image_file_impl(request, resource_dir).map_err(|error| error.to_string())
+    tauri::async_runtime::spawn_blocking(move || {
+        split_image_file_impl(request, resource_dir).map_err(|error| error.to_string())
+    })
+    .await
+    .map_err(|error| error.to_string())?
 }
 
 pub fn split_image_file_with_resource_dir(
@@ -115,8 +131,9 @@ fn inspect_splitting_file_impl(path: &str) -> Result<InspectSplittingFileResult>
     let ext = extension(&source);
 
     if is_supported_image(&source) {
-        let image = image::open(&source).with_context(|| format!("无法打开图片: {}", source.display()))?;
-        let (width, height) = image.dimensions();
+        // 仅读取图片尺寸而不完整解码，避免大图导入时卡顿。
+        let (width, height) = image::image_dimensions(&source)
+            .with_context(|| format!("无法读取图片尺寸: {}", source.display()))?;
         return Ok(InspectSplittingFileResult {
             kind: "image".into(),
             source_path: path.into(),
@@ -149,12 +166,18 @@ fn inspect_splitting_file_impl(path: &str) -> Result<InspectSplittingFileResult>
 }
 
 fn inspect_splitting_directory_impl(path: &str) -> Result<Vec<InspectSplittingFileResult>> {
-    let mut items = WalkDir::new(path)
+    // 先收集候选路径，再用 rayon 并行检查，加速大目录导入。
+    let candidates: Vec<PathBuf> = WalkDir::new(path)
         .into_iter()
         .filter_map(|entry| entry.ok())
         .filter(|entry| entry.file_type().is_file())
         .filter(|entry| is_supported_source(entry.path()))
-        .map(|entry| inspect_splitting_file_impl(&entry.path().to_string_lossy()))
+        .map(|entry| entry.into_path())
+        .collect();
+
+    let mut items = candidates
+        .par_iter()
+        .map(|candidate| inspect_splitting_file_impl(&candidate.to_string_lossy()))
         .collect::<Result<Vec<_>>>()?;
 
     items.sort_by(|left, right| left.source_name.cmp(&right.source_name));
@@ -221,8 +244,10 @@ fn write_split_outputs(
     request: &SplitImageFileRequest,
     image: &DynamicImage,
     next_index: &mut u32,
+    written_count: &mut u32,
     output_paths: &mut Vec<String>,
     skipped_count: &mut u32,
+    include_output_paths: bool,
 ) -> Result<()> {
     for split in split_grid(image, request.columns, request.rows)? {
         let output_path = output_directory.join(output_file_name(
@@ -236,8 +261,12 @@ fn write_split_outputs(
             *skipped_count += 1;
             continue;
         }
+        let split = apply_color_mode(split, &request.color_mode);
         write_dynamic_image(&output_path, &split, &request.output_format, Some(request.quality))?;
-        output_paths.push(output_path.to_string_lossy().into_owned());
+        *written_count += 1;
+        if include_output_paths {
+            output_paths.push(output_path.to_string_lossy().into_owned());
+        }
     }
     Ok(())
 }
@@ -251,35 +280,50 @@ fn split_image_file_impl(request: SplitImageFileRequest, resource_dir: Option<Pa
         .with_context(|| format!("无法创建输出目录: {}", output_directory.display()))?;
 
     let mut output_paths = Vec::new();
+    let mut written_count = 0;
     let mut skipped_count = 0;
+    let include_output_paths = request.include_output_paths.unwrap_or(true);
     let source_stem = stem(&source);
     let mut next_index = 1;
 
     if is_supported_image(&source) {
         let image = image::open(&source).with_context(|| format!("无法打开图片: {}", source.display()))?;
-        write_split_outputs(&source_stem, &output_directory, &request, &image, &mut next_index, &mut output_paths, &mut skipped_count)?;
+        write_split_outputs(
+            &source_stem,
+            &output_directory,
+            &request,
+            &image,
+            &mut next_index,
+            &mut written_count,
+            &mut output_paths,
+            &mut skipped_count,
+            include_output_paths,
+        )?;
     } else if extension(&source) == "pdf" {
-        let rendered_pages = render_pdf_pages(&source, resource_dir.as_deref(), &[], "standard")?;
-        if rendered_pages.is_empty() {
-            anyhow::bail!("PDF 没有可分割页面");
-        }
-        for rendered_page in rendered_pages {
+        let mut rendered_count = 0;
+        render_pdf_pages_with_callback(&source, resource_dir.as_deref(), &[], "standard", |rendered_page| {
+            rendered_count += 1;
             write_split_outputs(
                 &source_stem,
                 &output_directory,
                 &request,
                 &rendered_page.image,
                 &mut next_index,
+                &mut written_count,
                 &mut output_paths,
                 &mut skipped_count,
-            )?;
+                include_output_paths,
+            )
+        })?;
+        if rendered_count == 0 {
+            anyhow::bail!("PDF 没有可分割页面");
         }
     } else {
         anyhow::bail!("不支持的文件类型: {}", extension(&source));
     }
 
     Ok(SplitImageFileResult {
-        split_count: output_paths.len() as u32,
+        split_count: written_count,
         skipped_count,
         output_paths,
     })

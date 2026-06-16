@@ -43,7 +43,7 @@ describe('ExtractImagePage', () => {
     getSettingsStore().setState({
       language: 'zh-CN',
       outputDirectoryStrategy: 'same-as-source',
-      extraction: { namingPattern: 'source-name-index', outputFormat: 'jpg', colorMode: 'rgb' }
+      exportSettings: { namingPattern: 'source-name-index', outputFormat: 'jpg', colorMode: 'rgb', quality: 90 }
     });
     vi.mocked(inspectExtractionDocument).mockResolvedValue({
       sourcePath: 'F:/Demo/产品手册.docx',
@@ -62,20 +62,18 @@ describe('ExtractImagePage', () => {
   it('renders the current extraction workspace layout', () => {
     render(<ExtractImagePage />);
 
-    expect(screen.getByText('文件列表')).toBeInTheDocument();
+    expect(screen.queryByText('文件列表')).not.toBeInTheDocument();
     expect(screen.queryByText('提取设置')).not.toBeInTheDocument();
-    expect(screen.getByText('全局进度')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '添加文件' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '清空列表' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '开始提取' })).toBeDisabled();
-    expect(screen.getByText('0%')).toBeInTheDocument();
-    expect(screen.getByText('总数')).toBeInTheDocument();
-    expect(screen.getByText('成功')).toBeInTheDocument();
-    expect(screen.getByText('失败')).toBeInTheDocument();
-    expect(screen.getByText('进行中')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: '错误详情' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '打开输出目录' })).toBeDisabled();
-    expect(screen.getByRole('button', { name: '重试失败项' })).toBeDisabled();
+    // 批量状态栏、进度面板、错误详情、重试失败项、底部状态栏已按需求移除
+    expect(screen.queryByText('全局进度')).not.toBeInTheDocument();
+    expect(screen.queryByText('总数')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '错误详情' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '重试失败项' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('contentinfo', { name: '提取任务页状态栏' })).not.toBeInTheDocument();
   });
 
   it('renders revised extraction output settings', () => {
@@ -83,9 +81,10 @@ describe('ExtractImagePage', () => {
 
     const importButton = screen.getByRole('button', { name: '添加文件' });
 
+    // 新布局为上下结构：功能区在上、文件列表在下，不再使用两栏网格。
     expect(
       Array.from(container.querySelectorAll('div')).some((element) => element.className.includes('xl:grid-cols-[1fr_380px]'))
-    ).toBe(true);
+    ).toBe(false);
     expect(importButton.className).not.toContain('shadow');
     expect(screen.queryByLabelText('导出格式')).not.toBeInTheDocument();
     expect(screen.queryByLabelText('输出色彩模式')).not.toBeInTheDocument();
@@ -98,40 +97,16 @@ describe('ExtractImagePage', () => {
     expect(startButton.className).toContain('h-10');
     expect(startButton.className).not.toContain('h-14');
     expect(screen.getByRole('button', { name: '打开输出目录' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: '错误详情' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: '重试失败项' })).toBeInTheDocument();
 
     const emptyState = screen.getByText('支持word、pdf、ppt文件，拖拽文件夹即可打开。').closest('div');
     expect(emptyState?.className).toContain('justify-center');
     expect(emptyState?.className).toContain('min-h-[320px]');
 
-    const footer = screen.getByRole('contentinfo', { name: '提取任务页状态栏' });
-    expect(
-      within(footer).getByText((_, element) => element?.tagName === 'SPAN' && element.textContent === '当前任务: 图片提取')
-    ).toBeInTheDocument();
-    expect(
-      within(footer).getByText((_, element) => element?.tagName === 'SPAN' && element.textContent === '队列文件: 0')
-    ).toBeInTheDocument();
-    expect(
-      within(footer).getByText((_, element) => element?.tagName === 'SPAN' && element.textContent === '输出目录: --')
-    ).toBeInTheDocument();
-
-    const batchProgressPanel = screen.getByTestId('batch-progress-panel');
-    expect(batchProgressPanel.className).toContain('lg:w-[560px]');
-
-    const batchProgressFooter = screen.getByTestId('batch-progress-footer');
-    const failedDetailsButton = within(batchProgressFooter).getByRole('button', { name: '错误详情' });
-    const batchProgressActionsScroll = screen.getByTestId('batch-progress-actions-scroll');
-    expect(batchProgressActionsScroll.className).toContain('min-w-0');
-    expect(batchProgressActionsScroll.className).toContain('overflow-x-auto');
-    expect(within(batchProgressFooter).getByText('全局进度')).toBeInTheDocument();
-    expect(within(batchProgressFooter).getByText('0%')).toBeInTheDocument();
-    expect(within(batchProgressFooter).getByRole('button', { name: '打开输出目录' })).toBeDisabled();
-    expect(failedDetailsButton).toBeEnabled();
-    expect(failedDetailsButton).toHaveAttribute('aria-expanded', 'false');
-    expect(failedDetailsButton).toHaveAttribute('aria-controls', 'extraction-failed-details');
-    expect(screen.queryByRole('region', { name: '错误详情' })).not.toBeInTheDocument();
-    expect(within(batchProgressFooter).getByRole('button', { name: '重试失败项' })).toBeDisabled();
+    // 批量进度面板、错误详情、重试失败项、底部状态栏已移除
+    expect(screen.queryByTestId('batch-progress-panel')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '错误详情' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '重试失败项' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('contentinfo', { name: '提取任务页状态栏' })).not.toBeInTheDocument();
   });
 
   it('uses 清空列表 as the secondary list action label', () => {
@@ -146,8 +121,7 @@ describe('ExtractImagePage', () => {
 
     expect(screen.getByRole('button', { name: '开始提取' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Start extraction' })).not.toBeInTheDocument();
-    expect(screen.getByText('文件列表')).toBeInTheDocument();
-    expect(screen.getByText('全局进度')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '打开输出目录' })).toBeInTheDocument();
 
     act(() => {
       getSettingsStore().setState({ language: 'en-US' });
@@ -157,10 +131,7 @@ describe('ExtractImagePage', () => {
       expect(screen.getByRole('button', { name: 'Start extraction' })).toBeInTheDocument();
     });
     expect(screen.queryByRole('button', { name: '开始提取' })).not.toBeInTheDocument();
-    expect(screen.getByText('File Name')).toBeInTheDocument();
-    expect(screen.getByText('Overall progress')).toBeInTheDocument();
-    expect(screen.getByText('Total')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Error details' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Open output directory' })).toBeInTheDocument();
   });
 
   it('imports documents and folders from the single add-file button', async () => {
@@ -185,10 +156,6 @@ describe('ExtractImagePage', () => {
     expect(await screen.findByText('产品手册.docx')).toBeInTheDocument();
     expect(screen.getByText('价格表.pdf')).toBeInTheDocument();
     expect(screen.getAllByRole('checkbox', { checked: true })).toHaveLength(2);
-    const footer = screen.getByRole('contentinfo', { name: '提取任务页状态栏' });
-    expect(
-      within(footer).getByText((_, element) => element?.tagName === 'SPAN' && element.textContent === '输出目录: F:/Demo/docs')
-    ).toBeInTheDocument();
   });
 
   it('imports dropped folders through the empty extraction area', async () => {
@@ -206,10 +173,6 @@ describe('ExtractImagePage', () => {
     dragDropHandler({ payload: { type: 'drop', paths: ['F:/drop'] } });
 
     expect(await screen.findByText('a.pdf')).toBeInTheDocument();
-    const footer = screen.getByRole('contentinfo', { name: '提取任务页状态栏' });
-    expect(
-      within(footer).getByText((_, element) => element?.tagName === 'SPAN' && element.textContent === '输出目录: F:/drop')
-    ).toBeInTheDocument();
   });
 
   it('skips unsupported extraction files during add-file import', async () => {
@@ -246,7 +209,7 @@ describe('ExtractImagePage', () => {
     const user = userEvent.setup();
     vi.mocked(openExtractionDocuments).mockResolvedValue(['F:/Demo/产品手册.docx']);
     getSettingsStore().setState({
-      extraction: { outputFormat: 'jpg', colorMode: 'gray-cmyk', namingPattern: 'source-name-date' }
+      exportSettings: { outputFormat: 'jpg', colorMode: 'gray-cmyk', namingPattern: 'source-name-date', quality: 90 }
     });
 
     render(<ExtractImagePage />);
@@ -273,7 +236,9 @@ describe('ExtractImagePage', () => {
         outputDirectory: 'F:/Demo',
         outputFormat: 'jpg',
         colorMode: 'gray-cmyk',
-        namingPattern: 'source-name-date'
+        quality: 90,
+        namingPattern: 'source-name-date',
+        includeOutputPaths: false
       });
     });
 
@@ -310,38 +275,20 @@ describe('ExtractImagePage', () => {
     expect(extractDocumentImages).toHaveBeenCalledWith(expect.objectContaining({ sourcePath: 'F:/Demo/a.pdf' }));
   });
 
-  it('shows failed extraction details in an accessible region and retries failed documents', async () => {
+  it('surfaces a failed extraction in the document list row', async () => {
     const user = userEvent.setup();
     vi.mocked(openExtractionDocuments).mockResolvedValue(['F:/Demo/产品手册.docx']);
     vi.mocked(chooseOutputDirectory).mockResolvedValue('F:/Demo/out');
-    vi.mocked(extractDocumentImages)
-      .mockRejectedValueOnce(new Error('DOCX_IMAGE_EXTRACT_FAILED'))
-      .mockResolvedValueOnce({
-        outputPaths: ['F:/Demo/out/产品手册_001.png'],
-        extractedCount: 1,
-        skippedCount: 0
-      });
+    vi.mocked(extractDocumentImages).mockRejectedValueOnce(new Error('DOCX_IMAGE_EXTRACT_FAILED'));
 
     render(<ExtractImagePage />);
 
     await user.click(screen.getByRole('button', { name: '添加文件' }));
     await user.click(screen.getByRole('button', { name: '开始提取' }));
 
-    const failedDetailsButton = screen.getByRole('button', { name: '错误详情' });
-    await user.click(failedDetailsButton);
-
-    const failedDetailsDialog = await screen.findByRole('dialog', { name: '错误详情' });
-    expect(failedDetailsButton).toHaveAttribute('aria-expanded', 'true');
-    expect(within(failedDetailsDialog).getByText('产品手册.docx')).toBeInTheDocument();
-    expect(within(failedDetailsDialog).getByText('DOCX_IMAGE_EXTRACT_FAILED')).toBeInTheDocument();
-    expect(screen.queryByRole('region', { name: '错误详情' })).not.toBeInTheDocument();
-
-    await user.click(screen.getByRole('button', { name: '重试失败项' }));
-    await user.click(screen.getByRole('button', { name: '开始提取' }));
-
     await waitFor(() => {
-      expect(extractDocumentImages).toHaveBeenCalledTimes(2);
-      expect(screen.getByText('完成 1 张')).toBeInTheDocument();
+      expect(extractDocumentImages).toHaveBeenCalledTimes(1);
+      expect(screen.getByText('失败')).toBeInTheDocument();
     });
   });
 });

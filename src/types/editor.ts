@@ -76,9 +76,15 @@ export type GenerateImagePreviewRequest = {
 };
 
 export type GenerateImagePreviewResult = {
-  dataUrl: string;
+  previewPath: string;
   width: number;
   height: number;
+};
+
+export type PrefetchImagePreviewRequest = {
+  path: string;
+  maxWidth?: number;
+  maxHeight?: number;
 };
 
 export type SaveImageAsJpgRequest = {

@@ -7,8 +7,17 @@ use imageasy_lib::commands::splitting::{
     inspect_splitting_directory,
     inspect_splitting_file,
     split_image_file_with_resource_dir,
+    InspectSplittingFileResult,
     SplitImageFileRequest,
 };
+
+fn run_inspect_splitting_file(path: String) -> Result<InspectSplittingFileResult, String> {
+    tauri::async_runtime::block_on(inspect_splitting_file(path))
+}
+
+fn run_inspect_splitting_directory(path: String) -> Result<Vec<InspectSplittingFileResult>, String> {
+    tauri::async_runtime::block_on(inspect_splitting_directory(path))
+}
 
 fn write_minimal_empty_pdf(path: &std::path::Path) {
     let objects = vec![
@@ -43,7 +52,7 @@ fn inspect_splitting_file_reads_image_metadata() {
         .save(&source)
         .unwrap();
 
-    let result = inspect_splitting_file(source.to_string_lossy().into_owned()).unwrap();
+    let result = run_inspect_splitting_file(source.to_string_lossy().into_owned()).unwrap();
 
     assert_eq!(result.kind, "image");
     assert_eq!(result.source_name, "demo.png");
@@ -61,7 +70,7 @@ fn inspect_splitting_directory_recursively_collects_images_and_pdf() {
     write_minimal_empty_pdf(&nested.join("b.pdf"));
     fs::write(nested.join("c.txt"), b"unsupported").unwrap();
 
-    let result = inspect_splitting_directory(dir.path().to_string_lossy().into_owned()).unwrap();
+    let result = run_inspect_splitting_directory(dir.path().to_string_lossy().into_owned()).unwrap();
 
     assert_eq!(result.len(), 2);
     assert_eq!(result[0].kind, "image");
@@ -82,10 +91,12 @@ fn split_image_file_splits_grid_with_remainder_on_last_row_and_column() {
             source_path: source.to_string_lossy().into_owned(),
             output_directory: out.to_string_lossy().into_owned(),
             output_format: "png".into(),
+            color_mode: "rgb".into(),
             columns: 3,
             rows: 2,
             quality: 88,
             naming_pattern: "source-name-index".into(),
+            include_output_paths: Some(true),
         },
         None,
     )
@@ -119,10 +130,12 @@ fn split_image_file_splits_vertical_rows_only() {
             source_path: source.to_string_lossy().into_owned(),
             output_directory: out.to_string_lossy().into_owned(),
             output_format: "jpg".into(),
+            color_mode: "rgb".into(),
             columns: 1,
             rows: 3,
             quality: 75,
             naming_pattern: "source-name-index".into(),
+            include_output_paths: Some(true),
         },
         None,
     )
@@ -150,10 +163,12 @@ fn split_image_file_rejects_invalid_grid_and_tiny_image() {
             source_path: source.to_string_lossy().into_owned(),
             output_directory: dir.path().join("out").to_string_lossy().into_owned(),
             output_format: "png".into(),
+            color_mode: "rgb".into(),
             columns: 1,
             rows: 1,
             quality: 90,
             naming_pattern: "source-name-index".into(),
+            include_output_paths: Some(true),
         },
         None,
     )
@@ -165,10 +180,12 @@ fn split_image_file_rejects_invalid_grid_and_tiny_image() {
             source_path: source.to_string_lossy().into_owned(),
             output_directory: dir.path().join("out").to_string_lossy().into_owned(),
             output_format: "png".into(),
+            color_mode: "rgb".into(),
             columns: 11,
             rows: 1,
             quality: 90,
             naming_pattern: "source-name-index".into(),
+            include_output_paths: Some(true),
         },
         None,
     )
@@ -180,10 +197,12 @@ fn split_image_file_rejects_invalid_grid_and_tiny_image() {
             source_path: source.to_string_lossy().into_owned(),
             output_directory: dir.path().join("out").to_string_lossy().into_owned(),
             output_format: "png".into(),
+            color_mode: "rgb".into(),
             columns: 2,
             rows: 1,
             quality: 90,
             naming_pattern: "source-name-index".into(),
+            include_output_paths: Some(true),
         },
         None,
     )
@@ -207,10 +226,12 @@ fn split_image_file_skips_existing_outputs_with_continuous_names() {
             source_path: source.to_string_lossy().into_owned(),
             output_directory: out.to_string_lossy().into_owned(),
             output_format: "png".into(),
+            color_mode: "rgb".into(),
             columns: 2,
             rows: 1,
             quality: 90,
             naming_pattern: "source-name-index".into(),
+            include_output_paths: Some(true),
         },
         None,
     )

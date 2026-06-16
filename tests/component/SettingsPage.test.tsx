@@ -27,6 +27,14 @@ vi.mock('../../src/services/cacheCommands', () => ({
   clearAppCache
 }));
 
+const { chooseOutputDirectory } = vi.hoisted(() => ({
+  chooseOutputDirectory: vi.fn()
+}));
+
+vi.mock('../../src/services/fileDialog', () => ({
+  chooseOutputDirectory
+}));
+
 describe('SettingsPage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -44,6 +52,7 @@ describe('SettingsPage', () => {
       editorThumbnailBytes: 0,
       totalBytes: 0
     });
+    chooseOutputDirectory.mockResolvedValue('F:/exports');
   });
 
   it('saves theme and language changes from the settings page', async () => {
@@ -74,11 +83,9 @@ describe('SettingsPage', () => {
 
     const maxConcurrencyInput = await screen.findByLabelText('最大并发任务数');
     const outputStrategySelect = screen.getByLabelText('默认输出目录策略');
-    const rememberToggle = screen.getByRole('button', { name: '切换图片时保留调整参数' });
 
     fireEvent.change(maxConcurrencyInput, { target: { value: '4' } });
     await user.selectOptions(outputStrategySelect, 'custom');
-    await user.click(rememberToggle);
 
     expect(saveSettings).not.toHaveBeenCalled();
     expect(screen.getByRole('button', { name: '保存设置' })).toBeEnabled();
@@ -89,8 +96,28 @@ describe('SettingsPage', () => {
       expect(saveSettings).toHaveBeenLastCalledWith({
         ...loadedSettings,
         maxConcurrency: 4,
+        outputDirectoryStrategy: 'custom'
+      });
+    });
+  });
+
+  it('chooses and saves a fixed default output directory from settings', async () => {
+    const user = userEvent.setup();
+
+    render(<SettingsPage />);
+
+    const outputStrategySelect = await screen.findByLabelText('默认输出目录策略');
+    await user.selectOptions(outputStrategySelect, 'custom');
+    await user.click(screen.getByRole('button', { name: '选择输出目录' }));
+
+    expect(await screen.findByText('F:/exports')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: '保存设置' }));
+
+    await waitFor(() => {
+      expect(saveSettings).toHaveBeenLastCalledWith({
+        ...loadedSettings,
         outputDirectoryStrategy: 'custom',
-        rememberLastParams: true
+        defaultOutputDirectory: 'F:/exports'
       });
     });
   });
@@ -101,14 +128,12 @@ describe('SettingsPage', () => {
     render(<SettingsPage />);
 
     const maxConcurrencyInput = await screen.findByLabelText('最大并发任务数');
-    const rememberToggle = screen.getByRole('button', { name: '切换图片时保留调整参数' });
 
     fireEvent.change(maxConcurrencyInput, { target: { value: '5' } });
-    await user.click(rememberToggle);
     await user.click(screen.getByRole('button', { name: '恢复默认设置' }));
 
     expect(screen.getByDisplayValue('2')).toBeInTheDocument();
-    expect(rememberToggle).toHaveAttribute('aria-pressed', 'false');
+    expect(screen.queryByRole('button', { name: '切换图片时保留调整参数' })).not.toBeInTheDocument();
     expect(saveSettings).not.toHaveBeenCalled();
   });
 
@@ -130,13 +155,15 @@ describe('SettingsPage', () => {
 
     const generalTitle = screen.getByText('界面与任务设置');
     expect(generalTitle.className).toContain('mb-2');
-    expect(screen.getByText('图片编辑偏好').className).toContain('mb-4');
-    expect(screen.getByText('关于软件').className).toContain('mb-2');
-    expect(screen.getByText('缓存').className).toContain('mb-2');
+    expect(screen.queryByText('图片编辑偏好')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '切换图片时保留调整参数' })).not.toBeInTheDocument();
+    expect(screen.getByTestId('settings-cache-card')).toBeInTheDocument();
+    expect(screen.getByText('缓存')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '清理缓存' })).toBeInTheDocument();
 
     const concurrencyControl = screen.getByTestId('settings-concurrency-control');
     expect(concurrencyControl.className).toContain('max-w-[280px]');
-    expect(screen.getByTestId('settings-editor-card')).toBeInTheDocument();
+    expect(screen.queryByTestId('settings-editor-card')).not.toBeInTheDocument();
   });
 
   it('lays out the about card identity horizontally', async () => {
@@ -200,10 +227,24 @@ describe('SettingsPage', () => {
     expect(screen.getByLabelText('Language')).toBeInTheDocument();
     expect(screen.getByLabelText('Max Concurrent Tasks')).toBeInTheDocument();
     expect(screen.getByLabelText('Default Output Strategy')).toBeInTheDocument();
-    expect(screen.getByText('Editing Preferences')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Retain parameters on switch' })).toBeInTheDocument();
+    expect(screen.queryByText('Editing Preferences')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Retain parameters on switch' })).not.toBeInTheDocument();
+    expect(screen.getByText('Cache')).toBeInTheDocument();
     expect(screen.getByText('About')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Contact' })).toBeInTheDocument();
+  });
+
+  it('keeps the output directory path field at select height with the choose button outside the field', async () => {
+    const user = userEvent.setup();
+
+    render(<SettingsPage />);
+
+    await user.selectOptions(await screen.findByLabelText('默认输出目录策略'), 'custom');
+    const outputPathField = screen.getByTestId('settings-default-output-path');
+    const chooseButton = screen.getByRole('button', { name: '选择输出目录' });
+
+    expect(outputPathField.className).toContain('h-10');
+    expect(outputPathField).not.toContainElement(chooseButton);
   });
 
   it('shows cache usage and clears app cache', async () => {

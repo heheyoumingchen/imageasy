@@ -51,18 +51,18 @@ const setItemStatus = (items: ConversionItem[], id: string, status: ConversionSt
   items.map((item): ConversionItem => (item.id === id ? { ...item, ...extra, status } : item));
 
 const buildImageSummary = () => {
-  const conversion = getSettingsStore().getState().conversion;
+  const exportSettings = getSettingsStore().getState().exportSettings;
   return buildConversionSummary({
-    outputFormat: conversion.outputFormat,
-    colorMode: conversion.colorMode
+    outputFormat: exportSettings.outputFormat,
+    colorMode: exportSettings.colorMode
   });
 };
 
 const buildDocumentSummary = (settings: ConversionOutputSettings, item: ConversionItem) => {
-  const conversion = getSettingsStore().getState().conversion;
+  const exportSettings = getSettingsStore().getState().exportSettings;
   return buildConversionSummary({
-    outputFormat: conversion.outputFormat,
-    colorMode: conversion.colorMode,
+    outputFormat: exportSettings.outputFormat,
+    colorMode: exportSettings.colorMode,
     pageRangeMode: item.outputSettingsOverride.pageRangeMode ?? settings.pageRangeMode,
     pageRangeText: item.outputSettingsOverride.pageRangeText ?? settings.pageRangeText
   });

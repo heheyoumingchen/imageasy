@@ -3,7 +3,7 @@ use super::{
     pdf_rendering::render_pdf_pages,
 };
 use anyhow::{Context, Result};
-use image::GenericImageView;
+use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::{
     fs,
@@ -120,8 +120,11 @@ fn inspect_conversion_file_impl(path: &str) -> Result<InspectConversionFileResul
         .to_string();
 
     if is_image(&source) {
-        let image = image::open(&source).with_context(|| format!("无法打开图片: {path}"))?;
-        let (width, height) = image.dimensions();
+        // 仅读取图片头部获取尺寸，避免导入检查阶段全量解码，显著提升导入速度。
+        let (width, height) = image::ImageReader::open(&source)
+            .with_context(|| format!("无法打开图片: {path}"))?
+            .into_dimensions()
+            .with_context(|| format!("无法读取图片尺寸: {path}"))?;
         return Ok(InspectConversionFileResult {
             kind: "image".into(),
             source_path: path.into(),
@@ -161,12 +164,18 @@ fn inspect_conversion_file_impl(path: &str) -> Result<InspectConversionFileResul
 }
 
 fn inspect_conversion_directory_impl(path: &str) -> Result<Vec<InspectConversionFileResult>> {
-    let mut items = WalkDir::new(path)
+    // 先收集候选文件路径，再用 rayon 并行检查，加速大目录导入。
+    let candidates: Vec<PathBuf> = WalkDir::new(path)
         .into_iter()
         .filter_map(|entry| entry.ok())
         .filter(|entry| entry.file_type().is_file())
         .filter(|entry| is_image(entry.path()) || is_document(entry.path()))
-        .map(|entry| inspect_conversion_file_impl(&entry.path().to_string_lossy()))
+        .map(|entry| entry.into_path())
+        .collect();
+
+    let mut items = candidates
+        .par_iter()
+        .map(|candidate| inspect_conversion_file_impl(&candidate.to_string_lossy()))
         .collect::<Result<Vec<_>>>()?;
 
     items.sort_by(|left, right| left.source_name.cmp(&right.source_name));

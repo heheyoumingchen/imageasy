@@ -1,5 +1,4 @@
-import type { CSSProperties } from 'react';
-import type { NamingPattern } from '../../stores/settingsStore';
+import type { NamingPattern, OutputDirectoryStrategy } from '../../stores/settingsStore';
 
 export type TaskColorMode = 'rgb' | 'cmyk' | 'gray-cmyk';
 export type TaskOutputFormat = 'jpg' | 'png' | 'webp';
@@ -19,7 +18,11 @@ export type TaskSettingsCardCopy = {
   outputFormat: string;
   colorMode: string;
   grayCmyk: string;
-  outputQuality: string;
+  outputDirectoryStrategy: string;
+  sameAsSource: string;
+  custom: string;
+  chooseDefaultOutputDirectory: string;
+  defaultOutputDirectoryPlaceholder: string;
 };
 
 type TaskSettingsCardProps = {
@@ -27,9 +30,12 @@ type TaskSettingsCardProps = {
   value: TaskSettingsValue;
   formatOptions: TaskOutputFormat[];
   showColorMode: boolean;
-  showQuality: boolean;
+  outputDirectoryStrategy: OutputDirectoryStrategy;
+  defaultOutputDirectory: string;
   disabled?: boolean;
   onChange: (partial: Partial<TaskSettingsValue>) => void;
+  onOutputDirectoryStrategyChange: (value: OutputDirectoryStrategy) => void;
+  onChooseDefaultOutputDirectory: () => void;
 };
 
 const fieldClass =
@@ -41,13 +47,6 @@ const formatLabelMap: Record<TaskOutputFormat, string> = {
   jpg: 'JPG',
   png: 'PNG',
   webp: 'WebP'
-};
-
-const buildSliderStyle = (value: number, min: number, max: number): CSSProperties => {
-  const ratio = ((value - min) / (max - min)) * 100;
-  return {
-    background: `linear-gradient(90deg, #FF2D6C 0%, #FF2D6C ${ratio}%, #ECECF2 ${ratio}%, #ECECF2 100%)`
-  };
 };
 
 const ChevronIcon = () => (
@@ -67,16 +66,19 @@ export const TaskSettingsCard = ({
   value,
   formatOptions,
   showColorMode,
-  showQuality,
+  outputDirectoryStrategy,
+  defaultOutputDirectory,
   disabled = false,
-  onChange
+  onChange,
+  onOutputDirectoryStrategyChange,
+  onChooseDefaultOutputDirectory
 }: TaskSettingsCardProps) => (
-  <section className="bg-white rounded border border-border-light px-8 py-5">
-    <h2 className="text-lg font-bold text-[#1A1D23] mb-4 flex items-center gap-3">
+  <section className="px-8 py-5">
+    <h2 className="text-title-2 mb-4 flex items-center gap-3">
       <div className="w-1.5 h-6 bg-meitu rounded-full" />
       {copy.title}
     </h2>
-    <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+    <div className="grid grid-cols-1 md:grid-cols-3 gap-x-6 gap-y-5">
       <label className="block">
         <span className={labelClass}>{copy.namingPattern}</span>
         <div className="relative">
@@ -134,28 +136,43 @@ export const TaskSettingsCard = ({
         </label>
       ) : null}
 
-      {showQuality && value.quality !== undefined ? (
-        <label className="block">
-          <div className="flex items-center justify-between">
-            <span className={labelClass}>{copy.outputQuality}</span>
-            <span className="text-sm font-bold text-meitu bg-meitu-light px-2 py-0.5 rounded-full tabular-nums">
-              {value.quality}%
-            </span>
-          </div>
-          <input
-            aria-label={copy.outputQuality}
-            className="mt-3 h-1.5 w-full cursor-pointer appearance-none rounded-full disabled:cursor-not-allowed disabled:opacity-50"
-            style={buildSliderStyle(value.quality, 1, 100)}
-            type="range"
-            min={1}
-            max={100}
-            step={1}
-            value={value.quality}
+      {/* 第二排：默认输出目录策略 + 缓存（同一排） */}
+      <label className="block">
+        <span className={labelClass}>{copy.outputDirectoryStrategy}</span>
+        <div className="relative">
+          <select
+            aria-label={copy.outputDirectoryStrategy}
+            className={fieldClass}
+            value={outputDirectoryStrategy}
             disabled={disabled}
-            onChange={(event) => onChange({ quality: Number(event.target.value) })}
-          />
-        </label>
-      ) : null}
+            onChange={(event) => onOutputDirectoryStrategyChange(event.target.value as OutputDirectoryStrategy)}
+          >
+            <option value="same-as-source">{copy.sameAsSource}</option>
+            <option value="custom">{copy.custom}</option>
+          </select>
+          <ChevronIcon />
+        </div>
+      </label>
+
+      <div className="md:col-span-2">
+        <span className={labelClass}>{copy.chooseDefaultOutputDirectory}</span>
+        <div className="mt-2 flex items-center gap-3">
+          <div
+            data-testid="settings-default-output-path"
+            className={`flex h-10 min-w-0 flex-1 items-center rounded border border-border-light bg-[#FAFBFD] px-4 text-sm font-bold ${defaultOutputDirectory ? 'text-[#1A1D23]' : 'text-[#8D93A1]'}`}
+          >
+            <span className="truncate">{defaultOutputDirectory || copy.defaultOutputDirectoryPlaceholder}</span>
+          </div>
+          <button
+            type="button"
+            className="h-10 shrink-0 px-4 rounded border border-meitu bg-white text-[13px] font-bold text-meitu transition-all hover:bg-meitu-light active:scale-95 disabled:opacity-40"
+            disabled={disabled || outputDirectoryStrategy !== 'custom'}
+            onClick={onChooseDefaultOutputDirectory}
+          >
+            {copy.chooseDefaultOutputDirectory}
+          </button>
+        </div>
+      </div>
     </div>
   </section>
 );

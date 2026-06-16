@@ -1,10 +1,13 @@
 import { describe, expect, it, vi } from 'vitest';
 
 const mockInvoke = vi.fn();
-vi.mock('@tauri-apps/api/core', () => ({ invoke: (...args: unknown[]) => mockInvoke(...args) }));
+vi.mock('@tauri-apps/api/core', () => ({
+  invoke: (...args: unknown[]) => mockInvoke(...args),
+  convertFileSrc: (path: string) => `asset://${path}`,
+}));
 
 import { getAppCacheUsage, clearAppCache } from '../../src/services/cacheCommands';
-import { openImageSession, generateImagePreview, saveImageAsJpg, commitCropToWorkingImage } from '../../src/services/editorCommands';
+import { openImageSession, generateEditorThumbnail, generateImagePreview, prefetchImagePreview, saveImageAsJpg, commitCropToWorkingImage } from '../../src/services/editorCommands';
 import { inspectExtractionDocument, inspectExtractionDirectory, extractDocumentImages } from '../../src/services/extractionCommands';
 import { inspectDownloadSource, saveDownloadImages } from '../../src/services/imageDownloadCommands';
 import { inspectSplittingFile, inspectSplittingDirectory, splitImageFile } from '../../src/services/splittingCommands';
@@ -26,9 +29,16 @@ describe('service layer invoke contracts', () => {
     await openImageSession('/test/img.png');
     expect(mockInvoke).toHaveBeenCalledWith('open_image_session', { path: '/test/img.png' });
 
+    await generateEditorThumbnail('/test/img.png');
+    expect(mockInvoke).toHaveBeenCalledWith('generate_editor_thumbnail', { path: '/test/img.png' });
+
     const previewReq = { path: '/test/img.png', adjustments: {} as never };
     await generateImagePreview(previewReq);
     expect(mockInvoke).toHaveBeenCalledWith('generate_image_preview', { request: previewReq });
+
+    const prefetchReq = { path: '/test/next.png', maxWidth: 760, maxHeight: 560 };
+    await prefetchImagePreview(prefetchReq);
+    expect(mockInvoke).toHaveBeenCalledWith('prefetch_image_preview', { request: prefetchReq });
 
     const saveReq = { sourcePath: '/a.png', targetPath: '/b.jpg', adjustments: {} as never };
     await saveImageAsJpg(saveReq);
@@ -48,7 +58,7 @@ describe('service layer invoke contracts', () => {
     await inspectExtractionDirectory('/docs/');
     expect(mockInvoke).toHaveBeenCalledWith('inspect_extraction_directory', { path: '/docs/' });
 
-    const req = { sourcePath: '/doc.pdf', outputDirectory: '/out', outputFormat: 'png' as const, colorMode: 'rgb' as const, namingPattern: 'source-name-index' as const };
+    const req = { sourcePath: '/doc.pdf', outputDirectory: '/out', outputFormat: 'png' as const, colorMode: 'rgb' as const, quality: 90, namingPattern: 'source-name-index' as const };
     await extractDocumentImages(req);
     expect(mockInvoke).toHaveBeenCalledWith('extract_document_images', { request: req });
   });
@@ -78,6 +88,7 @@ describe('service layer invoke contracts', () => {
       sourcePath: '/demo/a.jpg',
       outputDirectory: '/out',
       outputFormat: 'jpg' as const,
+      colorMode: 'rgb' as const,
       columns: 3,
       rows: 2,
       quality: 88,
@@ -98,9 +109,9 @@ describe('service layer invoke contracts', () => {
 
     const req = {
       cells: [
-        { sourcePath: '/demo/a.png', row: 0, col: 0, rowSpan: 1, colSpan: 1 },
-        { sourcePath: '/demo/b.png', row: 0, col: 1, rowSpan: 1, colSpan: 1 },
-        { sourcePath: '', row: 1, col: 0, rowSpan: 1, colSpan: 2 }
+        { sourcePath: '/demo/a.png', row: 0, col: 0, rowSpan: 1, colSpan: 1, scale: 1, offsetX: 0, offsetY: 0 },
+        { sourcePath: '/demo/b.png', row: 0, col: 1, rowSpan: 1, colSpan: 1, scale: 1, offsetX: 0, offsetY: 0 },
+        { sourcePath: '', row: 1, col: 0, rowSpan: 1, colSpan: 2, scale: 1, offsetX: 0, offsetY: 0 }
       ],
       rows: 2,
       cols: 2,
@@ -111,6 +122,7 @@ describe('service layer invoke contracts', () => {
       borderRadius: 12,
       backgroundColor: '#FFFFFF',
       quality: 90,
+      colorMode: 'rgb' as const,
       outputDirectory: '/out',
       outputFormat: 'png' as const,
       namingPattern: 'source-name-date' as const

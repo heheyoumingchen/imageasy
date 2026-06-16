@@ -14,6 +14,12 @@
   font-family: "PingFang SC", "Microsoft YaHei", "Inter", system-ui, sans-serif;
   background-color: var(--color-bg-main);
   color: #2F3440;
+
+  /* 统一字体规范 */
+  --text-primary: #2F3440;
+  --text-secondary: #5D6472;
+  --text-tertiary: #8D93A1;
+  --text-placeholder: #B8BDC7;
 }
 
 [data-theme='dark'] {
@@ -21,6 +27,61 @@
   --color-border-light: #2E2E2E;
   --color-meitu-light: rgba(255, 45, 108, 0.14);
   color: #E6E6E6;
+
+  /* 暗色主题字体颜色 */
+  --text-primary: #E6E6E6;
+  --text-secondary: #9E9E9E;
+  --text-tertiary: #6B7280;
+  --text-placeholder: #4A4A4A;
+}
+
+/* 统一字体类 */
+.text-title-1 {
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.text-title-2 {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.text-title-3 {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.text-body {
+  font-size: 14px;
+  font-weight: 400;
+  color: var(--text-primary);
+}
+
+.text-body-secondary {
+  font-size: 14px;
+  font-weight: 400;
+  color: var(--text-secondary);
+}
+
+.text-caption {
+  font-size: 13px;
+  font-weight: 400;
+  color: var(--text-secondary);
+}
+
+.text-label {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-secondary);
+}
+
+.text-helper {
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--text-tertiary);
 }
 
 [data-theme='dark'] .bg-white,
@@ -147,4 +208,47 @@ input[type="range"]::-moz-range-thumb {
   border-radius: 50%;
   background: var(--color-meitu);
   cursor: pointer;
+}
+
+/* 细滚动条：去掉两端上下滑动三角箭头按钮 */
+.custom-scrollbar {
+  scrollbar-width: thin;
+  scrollbar-color: #C9CDD6 transparent;
+}
+
+.custom-scrollbar::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background-color: #C9CDD6;
+  border-radius: 9999px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb:hover {
+  background-color: #AAB0BC;
+}
+
+/* 关键：隐藏滚动条两端的三角箭头按钮 */
+.custom-scrollbar::-webkit-scrollbar-button {
+  display: none;
+  width: 0;
+  height: 0;
+}
+
+[data-theme='dark'] .custom-scrollbar {
+  scrollbar-color: #3A3A3A transparent;
+}
+
+[data-theme='dark'] .custom-scrollbar::-webkit-scrollbar-thumb {
+  background-color: #3A3A3A;
+}
+
+[data-theme='dark'] .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+  background-color: #4A4A4A;
 }

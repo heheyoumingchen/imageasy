@@ -1,6 +1,6 @@
 use std::{fs, path::PathBuf};
 
-use image::{GenericImageView, ImageBuffer, Rgba};
+use image::{ImageBuffer, Rgba};
 use tempfile::tempdir;
 
 use imageasy_lib::commands::stitching::{
@@ -10,6 +10,14 @@ use imageasy_lib::commands::stitching::{
     StitchImageFilesRequest,
 };
 
+fn run_inspect_stitching_file(path: String) -> Result<imageasy_lib::commands::stitching::InspectStitchingFileResult, String> {
+    tauri::async_runtime::block_on(inspect_stitching_file(path))
+}
+
+fn run_inspect_stitching_directory(path: String) -> Result<Vec<imageasy_lib::commands::stitching::InspectStitchingFileResult>, String> {
+    tauri::async_runtime::block_on(inspect_stitching_directory(path))
+}
+
 #[test]
 fn inspect_stitching_file_reads_image_metadata() {
     let dir = tempdir().unwrap();
@@ -18,11 +26,12 @@ fn inspect_stitching_file_reads_image_metadata() {
         .save(&source)
         .unwrap();
 
-    let result = inspect_stitching_file(source.to_string_lossy().into_owned()).unwrap();
+    let result = run_inspect_stitching_file(source.to_string_lossy().into_owned()).unwrap();
 
     assert_eq!(result.kind, "image");
     assert_eq!(result.source_name, "demo.webp");
     assert_eq!(result.image_metadata.unwrap().height, 6);
+    assert!(result.thumbnail.as_deref().unwrap_or_default().starts_with("data:image/jpeg;base64,"));
 }
 
 #[test]
@@ -36,14 +45,14 @@ fn inspect_stitching_directory_collects_images_only() {
     fs::write(nested.join("b.pdf"), b"pdf").unwrap();
     fs::write(nested.join("c.txt"), b"unsupported").unwrap();
 
-    let result = inspect_stitching_directory(dir.path().to_string_lossy().into_owned()).unwrap();
+    let result = run_inspect_stitching_directory(dir.path().to_string_lossy().into_owned()).unwrap();
 
     assert_eq!(result.len(), 1);
     assert_eq!(result[0].source_name, "a.png");
 }
 
 #[test]
-fn stitch_image_files_outputs_layout_canvas_with_object_cover_crop() {
+fn stitch_image_files_outputs_layout_canvas_with_object_contain_fit() {
     let dir = tempdir().unwrap();
     let a = dir.path().join("a.png");
     let b = dir.path().join("b.png");
@@ -52,8 +61,8 @@ fn stitch_image_files_outputs_layout_canvas_with_object_cover_crop() {
 
     let result = stitch_image_files(StitchImageFilesRequest {
         cells: vec![
-            imageasy_lib::commands::stitching::StitchLayoutCell { source_path: a.to_string_lossy().into_owned(), row: 0, col: 0, row_span: 1, col_span: 1 },
-            imageasy_lib::commands::stitching::StitchLayoutCell { source_path: b.to_string_lossy().into_owned(), row: 0, col: 1, row_span: 1, col_span: 1 },
+            imageasy_lib::commands::stitching::StitchLayoutCell { source_path: a.to_string_lossy().into_owned(), row: 0, col: 0, row_span: 1, col_span: 1, scale: 1.0, offset_x: 0.0, offset_y: 0.0 },
+            imageasy_lib::commands::stitching::StitchLayoutCell { source_path: b.to_string_lossy().into_owned(), row: 0, col: 1, row_span: 1, col_span: 1, scale: 1.0, offset_x: 0.0, offset_y: 0.0 },
         ],
         rows: 1,
         cols: 2,
@@ -64,6 +73,7 @@ fn stitch_image_files_outputs_layout_canvas_with_object_cover_crop() {
         border_radius: 0,
         background_color: "#FFFFFF".into(),
         quality: 90,
+        color_mode: "rgb".into(),
         output_directory: dir.path().join("out").to_string_lossy().into_owned(),
         output_format: "png".into(),
         naming_pattern: "source-name-index".into(),
@@ -84,7 +94,7 @@ fn stitch_image_files_rejects_too_few_images_and_invalid_columns() {
     ImageBuffer::<Rgba<u8>, _>::from_pixel(10, 6, Rgba([255, 0, 0, 255])).save(&a).unwrap();
 
     let too_few = stitch_image_files(StitchImageFilesRequest {
-        cells: vec![imageasy_lib::commands::stitching::StitchLayoutCell { source_path: a.to_string_lossy().into_owned(), row: 0, col: 0, row_span: 1, col_span: 1 }],
+        cells: vec![imageasy_lib::commands::stitching::StitchLayoutCell { source_path: a.to_string_lossy().into_owned(), row: 0, col: 0, row_span: 1, col_span: 1, scale: 1.0, offset_x: 0.0, offset_y: 0.0 }],
         rows: 1,
         cols: 1,
         canvas_ratio: "1:1".into(),
@@ -94,6 +104,7 @@ fn stitch_image_files_rejects_too_few_images_and_invalid_columns() {
         border_radius: 0,
         background_color: "#FFFFFF".into(),
         quality: 90,
+        color_mode: "rgb".into(),
         output_directory: dir.path().join("out").to_string_lossy().into_owned(),
         output_format: "png".into(),
         naming_pattern: "source-name-index".into(),
@@ -102,8 +113,8 @@ fn stitch_image_files_rejects_too_few_images_and_invalid_columns() {
 
     let invalid_layout = stitch_image_files(StitchImageFilesRequest {
         cells: vec![
-            imageasy_lib::commands::stitching::StitchLayoutCell { source_path: a.to_string_lossy().into_owned(), row: 0, col: 0, row_span: 1, col_span: 1 },
-            imageasy_lib::commands::stitching::StitchLayoutCell { source_path: a.to_string_lossy().into_owned(), row: 1, col: 0, row_span: 1, col_span: 1 },
+            imageasy_lib::commands::stitching::StitchLayoutCell { source_path: a.to_string_lossy().into_owned(), row: 0, col: 0, row_span: 1, col_span: 1, scale: 1.0, offset_x: 0.0, offset_y: 0.0 },
+            imageasy_lib::commands::stitching::StitchLayoutCell { source_path: a.to_string_lossy().into_owned(), row: 1, col: 0, row_span: 1, col_span: 1, scale: 1.0, offset_x: 0.0, offset_y: 0.0 },
         ],
         rows: 1,
         cols: 1,
@@ -114,6 +125,7 @@ fn stitch_image_files_rejects_too_few_images_and_invalid_columns() {
         border_radius: 0,
         background_color: "#FFFFFF".into(),
         quality: 90,
+        color_mode: "rgb".into(),
         output_directory: dir.path().join("out").to_string_lossy().into_owned(),
         output_format: "png".into(),
         naming_pattern: "source-name-index".into(),
@@ -134,8 +146,8 @@ fn stitch_image_files_increments_output_name_when_file_exists() {
 
     let result = stitch_image_files(StitchImageFilesRequest {
         cells: vec![
-            imageasy_lib::commands::stitching::StitchLayoutCell { source_path: a.to_string_lossy().into_owned(), row: 0, col: 0, row_span: 1, col_span: 1 },
-            imageasy_lib::commands::stitching::StitchLayoutCell { source_path: b.to_string_lossy().into_owned(), row: 0, col: 1, row_span: 1, col_span: 1 },
+            imageasy_lib::commands::stitching::StitchLayoutCell { source_path: a.to_string_lossy().into_owned(), row: 0, col: 0, row_span: 1, col_span: 1, scale: 1.0, offset_x: 0.0, offset_y: 0.0 },
+            imageasy_lib::commands::stitching::StitchLayoutCell { source_path: b.to_string_lossy().into_owned(), row: 0, col: 1, row_span: 1, col_span: 1, scale: 1.0, offset_x: 0.0, offset_y: 0.0 },
         ],
         rows: 1,
         cols: 2,
@@ -146,6 +158,7 @@ fn stitch_image_files_increments_output_name_when_file_exists() {
         border_radius: 0,
         background_color: "#FFFFFF".into(),
         quality: 90,
+        color_mode: "rgb".into(),
         output_directory: out.to_string_lossy().into_owned(),
         output_format: "png".into(),
         naming_pattern: "source-name-index".into(),
@@ -165,8 +178,8 @@ fn stitch_image_files_uses_short_side_resolution_and_background_spacing() {
 
     let result = stitch_image_files(StitchImageFilesRequest {
         cells: vec![
-            imageasy_lib::commands::stitching::StitchLayoutCell { source_path: a.to_string_lossy().into_owned(), row: 0, col: 0, row_span: 1, col_span: 1 },
-            imageasy_lib::commands::stitching::StitchLayoutCell { source_path: b.to_string_lossy().into_owned(), row: 0, col: 1, row_span: 1, col_span: 1 },
+            imageasy_lib::commands::stitching::StitchLayoutCell { source_path: a.to_string_lossy().into_owned(), row: 0, col: 0, row_span: 1, col_span: 1, scale: 1.0, offset_x: 0.0, offset_y: 0.0 },
+            imageasy_lib::commands::stitching::StitchLayoutCell { source_path: b.to_string_lossy().into_owned(), row: 0, col: 1, row_span: 1, col_span: 1, scale: 1.0, offset_x: 0.0, offset_y: 0.0 },
         ],
         rows: 1,
         cols: 2,
@@ -177,6 +190,7 @@ fn stitch_image_files_uses_short_side_resolution_and_background_spacing() {
         border_radius: 0,
         background_color: "#112233".into(),
         quality: 90,
+        color_mode: "rgb".into(),
         output_directory: dir.path().join("out").to_string_lossy().into_owned(),
         output_format: "png".into(),
         naming_pattern: "source-name-index".into(),
@@ -189,6 +203,37 @@ fn stitch_image_files_uses_short_side_resolution_and_background_spacing() {
 }
 
 #[test]
+fn stitch_image_files_accepts_six_times_cell_scale() {
+    let dir = tempdir().unwrap();
+    let a = dir.path().join("a.png");
+    let b = dir.path().join("b.png");
+    ImageBuffer::<Rgba<u8>, _>::from_pixel(10, 10, Rgba([255, 0, 0, 255])).save(&a).unwrap();
+    ImageBuffer::<Rgba<u8>, _>::from_pixel(10, 10, Rgba([0, 0, 255, 255])).save(&b).unwrap();
+
+    let result = stitch_image_files(StitchImageFilesRequest {
+        cells: vec![
+            imageasy_lib::commands::stitching::StitchLayoutCell { source_path: a.to_string_lossy().into_owned(), row: 0, col: 0, row_span: 1, col_span: 1, scale: 6.0, offset_x: 0.0, offset_y: 0.0 },
+            imageasy_lib::commands::stitching::StitchLayoutCell { source_path: b.to_string_lossy().into_owned(), row: 0, col: 1, row_span: 1, col_span: 1, scale: 1.0, offset_x: 0.0, offset_y: 0.0 },
+        ],
+        rows: 1,
+        cols: 2,
+        canvas_ratio: "1:1".into(),
+        resolution: 768,
+        padding: 0,
+        spacing: 0,
+        border_radius: 0,
+        background_color: "#FFFFFF".into(),
+        quality: 90,
+        color_mode: "rgb".into(),
+        output_directory: dir.path().join("out").to_string_lossy().into_owned(),
+        output_format: "png".into(),
+        naming_pattern: "source-name-index".into(),
+    }).unwrap();
+
+    assert_eq!(result.stitched_count, 2);
+}
+
+#[test]
 fn stitch_image_files_preserves_background_around_rounded_cell_corners() {
     let dir = tempdir().unwrap();
     let a = dir.path().join("a.png");
@@ -198,8 +243,8 @@ fn stitch_image_files_preserves_background_around_rounded_cell_corners() {
 
     let result = stitch_image_files(StitchImageFilesRequest {
         cells: vec![
-            imageasy_lib::commands::stitching::StitchLayoutCell { source_path: a.to_string_lossy().into_owned(), row: 0, col: 0, row_span: 1, col_span: 1 },
-            imageasy_lib::commands::stitching::StitchLayoutCell { source_path: b.to_string_lossy().into_owned(), row: 0, col: 1, row_span: 1, col_span: 1 },
+            imageasy_lib::commands::stitching::StitchLayoutCell { source_path: a.to_string_lossy().into_owned(), row: 0, col: 0, row_span: 1, col_span: 1, scale: 1.0, offset_x: 0.0, offset_y: 0.0 },
+            imageasy_lib::commands::stitching::StitchLayoutCell { source_path: b.to_string_lossy().into_owned(), row: 0, col: 1, row_span: 1, col_span: 1, scale: 1.0, offset_x: 0.0, offset_y: 0.0 },
         ],
         rows: 1,
         cols: 2,
@@ -210,12 +255,14 @@ fn stitch_image_files_preserves_background_around_rounded_cell_corners() {
         border_radius: 40,
         background_color: "#FFFFFF".into(),
         quality: 90,
+        color_mode: "rgb".into(),
         output_directory: dir.path().join("out").to_string_lossy().into_owned(),
         output_format: "png".into(),
         naming_pattern: "source-name-index".into(),
     }).unwrap();
 
     let output = image::open(PathBuf::from(&result.output_path)).unwrap().to_rgba8();
+    // 圆角处仍露出背景色；图片在 contain 适配下居中放置，取方格中心验证图像像素。
     assert_eq!(output.get_pixel(20, 20).0, [255, 255, 255, 255]);
-    assert_eq!(output.get_pixel(80, 80).0, [255, 0, 0, 255]);
+    assert_eq!(output.get_pixel(202, 384).0, [255, 0, 0, 255]);
 }

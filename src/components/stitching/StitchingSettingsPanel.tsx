@@ -59,6 +59,7 @@ const StitchingSettingsPanel = ({
     <ButtonGroup
       label={copy.canvasRatio}
       value={canvasRatio}
+      columns={3}
       options={[
         { label: '1:1', value: '1:1' as CanvasRatio },
         { label: '3:4', value: '3:4' as CanvasRatio },

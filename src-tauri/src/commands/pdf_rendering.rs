@@ -112,12 +112,16 @@ fn bind_pdfium(resource_dir: Option<&Path>) -> Result<Pdfium> {
     )
 }
 
-pub fn render_pdf_pages(
+pub fn render_pdf_pages_with_callback<F>(
     source_path: &Path,
     resource_dir: Option<&Path>,
     page_numbers: &[u32],
     render_density: &str,
-) -> Result<Vec<RenderedPdfPage>> {
+    mut on_page: F,
+) -> Result<()>
+where
+    F: FnMut(RenderedPdfPage) -> Result<()>,
+{
     let pdfium = bind_pdfium(resource_dir)?;
     let document = pdfium
         .load_pdf_from_file(source_path, None)
@@ -125,7 +129,7 @@ pub fn render_pdf_pages(
 
     let total_pages = document.pages().len() as u32;
     if total_pages == 0 {
-        return Ok(Vec::new());
+        return Ok(());
     }
 
     let selected_pages: Vec<u32> = if page_numbers.is_empty() {
@@ -135,7 +139,6 @@ pub fn render_pdf_pages(
     };
 
     let target_width = if render_density == "high" { 2480 } else { 1240 };
-    let mut rendered = Vec::new();
 
     for page_number in selected_pages {
         if page_number == 0 || page_number > total_pages {
@@ -144,12 +147,26 @@ pub fn render_pdf_pages(
         let page_index = (page_number - 1) as u16;
         let page = document.pages().get(page_index)?;
         let bitmap = page.render_with_config(&PdfRenderConfig::new().set_target_width(target_width))?;
-        rendered.push(RenderedPdfPage {
+        on_page(RenderedPdfPage {
             page_number,
             image: DynamicImage::ImageRgb8(bitmap.as_image().to_rgb8()),
-        });
+        })?;
     }
 
+    Ok(())
+}
+
+pub fn render_pdf_pages(
+    source_path: &Path,
+    resource_dir: Option<&Path>,
+    page_numbers: &[u32],
+    render_density: &str,
+) -> Result<Vec<RenderedPdfPage>> {
+    let mut rendered = Vec::new();
+    render_pdf_pages_with_callback(source_path, resource_dir, page_numbers, render_density, |page| {
+        rendered.push(page);
+        Ok(())
+    })?;
     Ok(rendered)
 }
 

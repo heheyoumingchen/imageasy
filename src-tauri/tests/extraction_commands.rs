@@ -8,6 +8,18 @@ use imageasy_lib::commands::extraction::{
     extract_document_images, inspect_extraction_directory, inspect_extraction_document, ExtractDocumentImagesRequest,
 };
 
+fn run_extract_document_images(request: ExtractDocumentImagesRequest) -> Result<imageasy_lib::commands::extraction::ExtractDocumentImagesResult, String> {
+    tauri::async_runtime::block_on(extract_document_images(request))
+}
+
+fn run_inspect_extraction_document(path: String) -> Result<imageasy_lib::commands::extraction::ExtractionDocumentInfo, String> {
+    tauri::async_runtime::block_on(inspect_extraction_document(path))
+}
+
+fn run_inspect_extraction_directory(path: String) -> Result<Vec<imageasy_lib::commands::extraction::ExtractionDocumentInfo>, String> {
+    tauri::async_runtime::block_on(inspect_extraction_directory(path))
+}
+
 fn write_zip_from_dir(source_dir: &std::path::Path, destination: &std::path::Path) {
     let file = fs::File::create(destination).unwrap();
     let mut zip = zip::ZipWriter::new(file);
@@ -149,7 +161,7 @@ fn inspect_extraction_document_reads_pdf_page_and_image_counts() {
     let pages = document.get_pages();
     assert_eq!(pages.len(), 1);
 
-    let result = inspect_extraction_document(source.to_string_lossy().into_owned()).unwrap();
+    let result = run_inspect_extraction_document(source.to_string_lossy().into_owned()).unwrap();
 
     assert_eq!(result.source_name, "demo.pdf");
     assert_eq!(result.extension, "pdf");
@@ -166,7 +178,7 @@ fn inspect_extraction_directory_recursively_collects_supported_documents() {
     fs::write(nested.join("manual.docx"), b"fake-docx").unwrap();
     fs::write(nested.join("notes.txt"), b"unsupported").unwrap();
 
-    let result = inspect_extraction_directory(dir.path().to_string_lossy().into_owned()).unwrap();
+    let result = run_inspect_extraction_directory(dir.path().to_string_lossy().into_owned()).unwrap();
 
     assert_eq!(result.len(), 2);
     assert_eq!(result[0].source_name, "demo.pdf");
@@ -183,12 +195,14 @@ fn extract_document_images_writes_output_files_from_image_sources() {
         .save(&source)
         .unwrap();
 
-    let result = extract_document_images(ExtractDocumentImagesRequest {
+    let result = run_extract_document_images(ExtractDocumentImagesRequest {
         source_path: source.to_string_lossy().into_owned(),
         output_directory: output_directory.to_string_lossy().into_owned(),
         output_format: "jpg".into(),
         color_mode: "rgb".into(),
+        quality: 90,
         naming_pattern: "source-name-index".into(),
+        include_output_paths: Some(true),
     })
     .unwrap();
 
@@ -207,12 +221,14 @@ fn extract_document_images_extracts_embedded_images_from_pdf() {
     let source = dir.path().join("demo.pdf");
     write_minimal_pdf_with_embedded_image(&source);
 
-    let result = extract_document_images(ExtractDocumentImagesRequest {
+    let result = run_extract_document_images(ExtractDocumentImagesRequest {
         source_path: source.to_string_lossy().into_owned(),
         output_directory: dir.path().join("out").to_string_lossy().into_owned(),
         output_format: "jpg".into(),
         color_mode: "rgb".into(),
+        quality: 90,
         naming_pattern: "source-name-index".into(),
+        include_output_paths: Some(true),
     })
     .unwrap();
 
@@ -235,16 +251,18 @@ fn inspect_and_extract_return_zero_for_pdf_without_embedded_images() {
     let source = dir.path().join("empty.pdf");
     write_minimal_empty_pdf(&source);
 
-    let inspect_result = inspect_extraction_document(source.to_string_lossy().into_owned()).unwrap();
+    let inspect_result = run_inspect_extraction_document(source.to_string_lossy().into_owned()).unwrap();
     assert_eq!(inspect_result.page_count, 0);
     assert_eq!(inspect_result.embedded_image_count, 0);
 
-    let extract_result = extract_document_images(ExtractDocumentImagesRequest {
+    let extract_result = run_extract_document_images(ExtractDocumentImagesRequest {
         source_path: source.to_string_lossy().into_owned(),
         output_directory: dir.path().join("out").to_string_lossy().into_owned(),
         output_format: "jpg".into(),
         color_mode: "rgb".into(),
+        quality: 90,
         naming_pattern: "source-name-index".into(),
+        include_output_paths: Some(true),
     })
     .unwrap();
 
@@ -258,12 +276,14 @@ fn extract_document_images_extracts_docx_without_soffice() {
     let source = dir.path().join("demo.docx");
     write_minimal_docx_with_embedded_image(&source);
 
-    let result = extract_document_images(ExtractDocumentImagesRequest {
+    let result = run_extract_document_images(ExtractDocumentImagesRequest {
         source_path: source.to_string_lossy().into_owned(),
         output_directory: dir.path().join("out").to_string_lossy().into_owned(),
         output_format: "jpg".into(),
         color_mode: "rgb".into(),
+        quality: 90,
         naming_pattern: "source-name-index".into(),
+        include_output_paths: Some(true),
     })
     .unwrap();
 
@@ -279,16 +299,18 @@ fn extract_document_images_extracts_pptx_original_images_without_recoloring() {
     let source = dir.path().join("slides.pptx");
     write_minimal_pptx_with_embedded_image(&source);
 
-    let inspected = inspect_extraction_document(source.to_string_lossy().into_owned()).unwrap();
+    let inspected = run_inspect_extraction_document(source.to_string_lossy().into_owned()).unwrap();
     assert_eq!(inspected.extension, "pptx");
     assert_eq!(inspected.embedded_image_count, 1);
 
-    let result = extract_document_images(ExtractDocumentImagesRequest {
+    let result = run_extract_document_images(ExtractDocumentImagesRequest {
         source_path: source.to_string_lossy().into_owned(),
         output_directory: dir.path().join("out").to_string_lossy().into_owned(),
         output_format: "png".into(),
         color_mode: "rgb".into(),
+        quality: 90,
         naming_pattern: "source-name-index".into(),
+        include_output_paths: Some(true),
     })
     .unwrap();
 
@@ -305,12 +327,14 @@ fn extract_document_images_skips_unsupported_pptx_media_files() {
     let source = dir.path().join("slides-with-wdp.pptx");
     write_pptx_with_png_and_unsupported_wdp(&source);
 
-    let result = extract_document_images(ExtractDocumentImagesRequest {
+    let result = run_extract_document_images(ExtractDocumentImagesRequest {
         source_path: source.to_string_lossy().into_owned(),
         output_directory: dir.path().join("out").to_string_lossy().into_owned(),
         output_format: "png".into(),
         color_mode: "rgb".into(),
+        quality: 90,
         naming_pattern: "source-name-index".into(),
+        include_output_paths: Some(true),
     })
     .unwrap();
 
@@ -335,12 +359,14 @@ fn extract_document_images_returns_zero_for_docx_without_images() {
     fs::write(root.join("word/_rels/document.xml.rels"), b"<Relationships></Relationships>").unwrap();
     write_zip_from_dir(root, &source);
 
-    let result = extract_document_images(ExtractDocumentImagesRequest {
+    let result = run_extract_document_images(ExtractDocumentImagesRequest {
         source_path: source.to_string_lossy().into_owned(),
         output_directory: dir.path().join("out").to_string_lossy().into_owned(),
         output_format: "jpg".into(),
         color_mode: "rgb".into(),
+        quality: 90,
         naming_pattern: "source-name-index".into(),
+        include_output_paths: Some(true),
     })
     .unwrap();
 

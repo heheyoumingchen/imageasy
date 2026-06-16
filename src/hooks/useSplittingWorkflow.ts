@@ -61,7 +61,11 @@ export const useSplittingWorkflow = () => {
     const fileResults = await Promise.all(sources.files.map((path) => inspectSplittingFile(path)));
     const directoryGroups = await Promise.all(sources.directories.map((path) => inspectSplittingDirectory(path)));
     const supported = [...fileResults, ...directoryGroups.flat()].filter((result) => result.kind !== 'unsupported');
-    setItems((current) => [...current, ...supported.map(createItem)]);
+    setItems((current) => {
+      const existingPaths = new Set(current.map((item) => item.sourcePath));
+      const added = supported.filter((result) => !existingPaths.has(result.sourcePath)).map(createItem);
+      return [...current, ...added];
+    });
 
     if (!outputDirectoryManual && sources.directories[0]) {
       setOutputDirectory(sources.directories[0]);
@@ -114,15 +118,17 @@ export const useSplittingWorkflow = () => {
     setItems((current) => markItem(current, item.sourcePath, { status: 'running', errorMessage: null, outputPaths: [], splitCount: 0 }));
     try {
       const { columns, rows } = gridForMode(mode, horizontalSplits, verticalSplits);
-      const splitting = getSettingsStore().getState().splitting;
+      const exportSettings = getSettingsStore().getState().exportSettings;
       const result = await splitImageFile({
         sourcePath: item.sourcePath,
         outputDirectory: targetDirectory,
-        outputFormat: splitting.outputFormat,
+        outputFormat: exportSettings.outputFormat,
+        colorMode: exportSettings.colorMode,
         columns,
         rows,
-        quality: splitting.quality,
-        namingPattern: splitting.namingPattern
+        quality: exportSettings.quality,
+        namingPattern: exportSettings.namingPattern,
+        includeOutputPaths: false
       });
       setItems((current) => markItem(current, item.sourcePath, { status: 'success', outputPaths: result.outputPaths, splitCount: result.splitCount, errorMessage: null }));
     } catch (error) {
@@ -133,17 +139,13 @@ export const useSplittingWorkflow = () => {
   const startSplitting = async (copyErrors: { outputDirectoryRequired: string }) => {
     if (isRunning) return;
     let targetDirectory = outputDirectory;
+    const settingsState = getSettingsStore().getState();
+    if (settingsState.outputDirectoryStrategy === 'custom') {
+      targetDirectory = settingsState.defaultOutputDirectory;
+    }
     if (!targetDirectory) {
-      if (getSettingsStore().getState().outputDirectoryStrategy === 'custom') {
-        const selected = await chooseOutputDirectory();
-        if (!selected) { setPageError(copyErrors.outputDirectoryRequired); return; }
-        targetDirectory = selected;
-        setOutputDirectory(selected);
-        setOutputDirectoryManual(true);
-      } else {
-        setPageError(copyErrors.outputDirectoryRequired);
-        return;
-      }
+      setPageError(copyErrors.outputDirectoryRequired);
+      return;
     }
     const readyItems = items.filter((item) => item.status === 'ready' && item.selected);
     if (readyItems.length === 0) return;

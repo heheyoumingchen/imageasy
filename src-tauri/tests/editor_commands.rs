@@ -1,13 +1,28 @@
 use std::path::PathBuf;
 
-use base64::{engine::general_purpose::STANDARD, Engine as _};
 use image::{GenericImageView, ImageBuffer, Rgba};
 use tempfile::tempdir;
 
 use imageasy_lib::commands::editor::{
-    open_image_session, generate_image_preview, save_image_as_jpg, commit_crop_to_working_image,
-    AdjustmentParams, CommitCropRequest, CropRect, GenerateImagePreviewRequest, SaveImageAsJpgRequest,
+    open_image_session, generate_editor_thumbnail, generate_image_preview, prefetch_image_preview, save_image_as_jpg, commit_crop_to_working_image,
+    AdjustmentParams, CommitCropRequest, CropRect, GenerateImagePreviewRequest, PrefetchImagePreviewRequest, SaveImageAsJpgRequest,
 };
+
+fn run_open_image_session(path: String) -> Result<imageasy_lib::commands::editor::OpenImageSessionResult, String> {
+    tauri::async_runtime::block_on(open_image_session(path))
+}
+
+fn run_generate_editor_thumbnail(path: String) -> Result<String, String> {
+    tauri::async_runtime::block_on(generate_editor_thumbnail(path))
+}
+
+fn run_generate_image_preview(request: GenerateImagePreviewRequest) -> Result<imageasy_lib::commands::editor::GenerateImagePreviewResult, String> {
+    tauri::async_runtime::block_on(generate_image_preview(request))
+}
+
+fn run_prefetch_image_preview(request: PrefetchImagePreviewRequest) -> Result<(), String> {
+    tauri::async_runtime::block_on(prefetch_image_preview(request))
+}
 
 fn default_adjustments() -> AdjustmentParams {
     AdjustmentParams {
@@ -39,7 +54,7 @@ fn open_image_session_sorts_supported_images_and_tracks_current_index() {
         .save(&first)
         .unwrap();
 
-    let session = open_image_session(first.to_string_lossy().into_owned()).unwrap();
+    let session = run_open_image_session(first.to_string_lossy().into_owned()).unwrap();
 
     assert_eq!(session.current_index, 0);
     assert_eq!(session.directory_images[0].summary.name, "1.png");
@@ -47,7 +62,21 @@ fn open_image_session_sorts_supported_images_and_tracks_current_index() {
 }
 
 #[test]
-fn generate_image_preview_returns_jpeg_data_url() {
+fn generate_editor_thumbnail_returns_jpeg_data_url() {
+    let dir = tempdir().unwrap();
+    let source = dir.path().join("thumb-source.png");
+
+    ImageBuffer::<Rgba<u8>, _>::from_pixel(16, 10, Rgba([40, 90, 140, 255]))
+        .save(&source)
+        .unwrap();
+
+    let thumbnail = run_generate_editor_thumbnail(source.to_string_lossy().into_owned()).unwrap();
+
+    assert!(thumbnail.starts_with("data:image/jpeg;base64,"));
+}
+
+#[test]
+fn generate_image_preview_returns_preview_file_path() {
     let dir = tempdir().unwrap();
     let source = dir.path().join("demo.png");
 
@@ -59,7 +88,7 @@ fn generate_image_preview_returns_jpeg_data_url() {
     adjustments.brightness = 10;
     adjustments.contrast = 5;
 
-    let preview = generate_image_preview(GenerateImagePreviewRequest {
+    let preview = run_generate_image_preview(GenerateImagePreviewRequest {
         path: source.to_string_lossy().into_owned(),
         adjustments,
         max_width: Some(480),
@@ -67,9 +96,78 @@ fn generate_image_preview_returns_jpeg_data_url() {
     })
     .unwrap();
 
-    assert!(preview.data_url.starts_with("data:image/jpeg;base64,"));
+    let preview_path = PathBuf::from(&preview.preview_path);
+    assert!(preview_path.exists(), "预览文件应该存在: {}", preview.preview_path);
+    assert!(preview.preview_path.ends_with(".jpg"));
     assert!(preview.width > 0);
     assert!(preview.height > 0);
+}
+
+#[test]
+fn prefetch_image_preview_uses_the_same_async_command_path_as_main_preview() {
+    let dir = tempdir().unwrap();
+    let source = dir.path().join("prefetch-preview.png");
+
+    ImageBuffer::<Rgba<u8>, _>::from_pixel(12, 8, Rgba([80, 120, 160, 255]))
+        .save(&source)
+        .unwrap();
+
+    run_prefetch_image_preview(PrefetchImagePreviewRequest {
+        path: source.to_string_lossy().into_owned(),
+        max_width: Some(760),
+        max_height: Some(560),
+    })
+    .unwrap();
+
+    let preview = run_generate_image_preview(GenerateImagePreviewRequest {
+        path: source.to_string_lossy().into_owned(),
+        adjustments: default_adjustments(),
+        max_width: Some(760),
+        max_height: Some(560),
+    })
+    .unwrap();
+
+    let preview_path = PathBuf::from(&preview.preview_path);
+    assert!(preview_path.exists(), "预览文件应该存在");
+    assert!(preview.preview_path.ends_with(".jpg"));
+    assert!(preview.width > 0);
+    assert!(preview.height > 0);
+    assert!(preview.width <= 760);
+    assert!(preview.height <= 560);
+}
+
+#[test]
+fn generate_image_preview_invalidates_cache_when_source_file_changes() {
+    let dir = tempdir().unwrap();
+    let source = dir.path().join("cache-source.png");
+
+    ImageBuffer::<Rgba<u8>, _>::from_pixel(8, 8, Rgba([255, 0, 0, 255]))
+        .save(&source)
+        .unwrap();
+
+    let first = run_generate_image_preview(GenerateImagePreviewRequest {
+        path: source.to_string_lossy().into_owned(),
+        adjustments: default_adjustments(),
+        max_width: Some(320),
+        max_height: Some(240),
+    })
+    .unwrap();
+
+    std::thread::sleep(std::time::Duration::from_millis(5));
+    ImageBuffer::<Rgba<u8>, _>::from_pixel(8, 8, Rgba([0, 255, 0, 255]))
+        .save(&source)
+        .unwrap();
+
+    let second = run_generate_image_preview(GenerateImagePreviewRequest {
+        path: source.to_string_lossy().into_owned(),
+        adjustments: default_adjustments(),
+        max_width: Some(320),
+        max_height: Some(240),
+    })
+    .unwrap();
+
+    // 源文件变化后，预览路径应该不同（缓存 key 包含 mtime 和 size）
+    assert_ne!(first.preview_path, second.preview_path);
 }
 
 #[test]
@@ -105,7 +203,7 @@ fn warm_filter_changes_preview_pixels() {
         .save(&source)
         .unwrap();
 
-    let neutral = generate_image_preview(GenerateImagePreviewRequest {
+    let neutral = run_generate_image_preview(GenerateImagePreviewRequest {
         path: source.to_string_lossy().into_owned(),
         adjustments: default_adjustments(),
         max_width: Some(320),
@@ -117,7 +215,7 @@ fn warm_filter_changes_preview_pixels() {
     warm_adjustments.filter_type = "warm".into();
     warm_adjustments.filter_intensity = 100;
 
-    let warm = generate_image_preview(GenerateImagePreviewRequest {
+    let warm = run_generate_image_preview(GenerateImagePreviewRequest {
         path: source.to_string_lossy().into_owned(),
         adjustments: warm_adjustments,
         max_width: Some(320),
@@ -125,8 +223,8 @@ fn warm_filter_changes_preview_pixels() {
     })
     .unwrap();
 
-    let neutral_image = image::load_from_memory(&STANDARD.decode(neutral.data_url.split(',').nth(1).unwrap()).unwrap()).unwrap();
-    let warm_image = image::load_from_memory(&STANDARD.decode(warm.data_url.split(',').nth(1).unwrap()).unwrap()).unwrap();
+    let neutral_image = image::open(&neutral.preview_path).unwrap();
+    let warm_image = image::open(&warm.preview_path).unwrap();
 
     let neutral_pixel = neutral_image.get_pixel(0, 0).0;
     let warm_pixel = warm_image.get_pixel(0, 0).0;
@@ -144,7 +242,7 @@ fn temperature_and_tint_change_preview_pixels() {
         .save(&source)
         .unwrap();
 
-    let neutral = generate_image_preview(GenerateImagePreviewRequest {
+    let neutral = run_generate_image_preview(GenerateImagePreviewRequest {
         path: source.to_string_lossy().into_owned(),
         adjustments: default_adjustments(),
         max_width: Some(320),
@@ -156,7 +254,7 @@ fn temperature_and_tint_change_preview_pixels() {
     adjusted_adjustments.temperature = 80;
     adjusted_adjustments.tint = 45;
 
-    let adjusted = generate_image_preview(GenerateImagePreviewRequest {
+    let adjusted = run_generate_image_preview(GenerateImagePreviewRequest {
         path: source.to_string_lossy().into_owned(),
         adjustments: adjusted_adjustments,
         max_width: Some(320),
@@ -164,8 +262,8 @@ fn temperature_and_tint_change_preview_pixels() {
     })
     .unwrap();
 
-    let neutral_image = image::load_from_memory(&STANDARD.decode(neutral.data_url.split(',').nth(1).unwrap()).unwrap()).unwrap();
-    let adjusted_image = image::load_from_memory(&STANDARD.decode(adjusted.data_url.split(',').nth(1).unwrap()).unwrap()).unwrap();
+    let neutral_image = image::open(&neutral.preview_path).unwrap();
+    let adjusted_image = image::open(&adjusted.preview_path).unwrap();
 
     assert_ne!(adjusted_image.get_pixel(0, 0).0, neutral_image.get_pixel(0, 0).0);
 }
@@ -209,7 +307,7 @@ fn sepia_filter_changes_preview_pixels() {
         .save(&source)
         .unwrap();
 
-    let neutral = generate_image_preview(GenerateImagePreviewRequest {
+    let neutral = run_generate_image_preview(GenerateImagePreviewRequest {
         path: source.to_string_lossy().into_owned(),
         adjustments: default_adjustments(),
         max_width: Some(320),
@@ -221,7 +319,7 @@ fn sepia_filter_changes_preview_pixels() {
     sepia_adjustments.filter_type = "sepia".into();
     sepia_adjustments.filter_intensity = 100;
 
-    let sepia = generate_image_preview(GenerateImagePreviewRequest {
+    let sepia = run_generate_image_preview(GenerateImagePreviewRequest {
         path: source.to_string_lossy().into_owned(),
         adjustments: sepia_adjustments,
         max_width: Some(320),
@@ -229,8 +327,8 @@ fn sepia_filter_changes_preview_pixels() {
     })
     .unwrap();
 
-    let neutral_image = image::load_from_memory(&STANDARD.decode(neutral.data_url.split(',').nth(1).unwrap()).unwrap()).unwrap();
-    let sepia_image = image::load_from_memory(&STANDARD.decode(sepia.data_url.split(',').nth(1).unwrap()).unwrap()).unwrap();
+    let neutral_image = image::open(&neutral.preview_path).unwrap();
+    let sepia_image = image::open(&sepia.preview_path).unwrap();
 
     assert_ne!(sepia_image.get_pixel(0, 0).0, neutral_image.get_pixel(0, 0).0);
 }
@@ -309,7 +407,7 @@ fn preview_and_save_share_rotation_and_crop_semantics() {
         height: 4,
     });
 
-    let preview = generate_image_preview(GenerateImagePreviewRequest {
+    let preview = run_generate_image_preview(GenerateImagePreviewRequest {
         path: source.to_string_lossy().into_owned(),
         adjustments: adjustments.clone(),
         max_width: Some(320),
@@ -388,4 +486,3 @@ fn commit_crop_uses_a_stable_working_directory_even_for_existing_working_images(
     assert_eq!(output_path.parent(), Some(expected_working_dir.as_path()));
     assert!(output_path.exists());
 }
-

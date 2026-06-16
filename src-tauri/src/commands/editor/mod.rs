@@ -3,7 +3,7 @@ pub mod filters;
 pub mod save;
 
 pub use crop::commit_crop_to_working_image;
-pub use filters::generate_image_preview;
+pub use filters::{generate_image_preview, prefetch_image_preview};
 pub use save::save_image_as_jpg;
 
 use anyhow::{Context, Result};
@@ -91,12 +91,37 @@ pub struct GenerateImagePreviewRequest {
     pub max_height: Option<u32>,
 }
 
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PrefetchImagePreviewRequest {
+    pub path: String,
+    pub max_width: Option<u32>,
+    pub max_height: Option<u32>,
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GenerateImagePreviewResult {
-    pub data_url: String,
+    pub preview_path: String,
     pub width: u32,
     pub height: u32,
+}
+
+pub(crate) fn default_adjustments() -> AdjustmentParams {
+    AdjustmentParams {
+        brightness: 0,
+        contrast: 0,
+        saturation: 0,
+        temperature: 0,
+        tint: 0,
+        sharpen: 0,
+        clarity: 0,
+        quality: 100,
+        filter_type: "none".into(),
+        filter_intensity: 0,
+        rotation: 0,
+        crop: None,
+    }
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -130,8 +155,22 @@ pub struct CommitCropResult {
 }
 
 #[tauri::command]
-pub fn open_image_session(path: String) -> Result<OpenImageSessionResult, String> {
-    open_image_session_impl(&path).map_err(|error| error.to_string())
+pub async fn open_image_session(path: String) -> Result<OpenImageSessionResult, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        open_image_session_impl(&path).map_err(|error| error.to_string())
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
+// 胶片栏缩略图按需生成：前端并行懒加载，避免打开目录时一次性解码全部图片。
+#[tauri::command]
+pub async fn generate_editor_thumbnail(path: String) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        create_thumbnail_data_url(Path::new(&path), 128, 58).map_err(|error| error.to_string())
+    })
+    .await
+    .map_err(|error| error.to_string())?
 }
 
 fn open_image_session_impl(path: &str) -> Result<OpenImageSessionResult> {
@@ -163,7 +202,7 @@ fn open_image_session_impl(path: &str) -> Result<OpenImageSessionResult> {
         .map(|(index, sibling_path)| {
             Ok(EditorDirectoryImage {
                 index,
-                thumbnail_data_url: create_thumbnail_data_url(sibling_path, 128, 58)?,
+                thumbnail_data_url: String::new(),
                 summary: read_image_summary(sibling_path)?,
             })
         })
@@ -200,6 +239,16 @@ pub fn editor_working_cache_dir() -> PathBuf {
         std::env::temp_dir()
             .join("imageasy")
             .join("editor-work")
+    }
+}
+
+pub fn editor_preview_cache_dir() -> PathBuf {
+    if let Some(cache) = crate::portable::portable_cache_dir() {
+        cache.join("editor-previews")
+    } else {
+        std::env::temp_dir()
+            .join("imageasy")
+            .join("editor-previews")
     }
 }
 
@@ -320,6 +369,10 @@ pub(crate) fn apply_crop(image: DynamicImage, crop: Option<&CropRect>) -> Dynami
 }
 
 pub(crate) fn apply_saturation(image: DynamicImage, amount: f32) -> DynamicImage {
+    if amount.abs() < f32::EPSILON {
+        return image;
+    }
+
     let mut rgba = image.to_rgba8();
     for pixel in rgba.pixels_mut() {
         let [r, g, b, a] = pixel.0;

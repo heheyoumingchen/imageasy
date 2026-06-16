@@ -5,6 +5,7 @@ const loadedSettings = {
   ...DEFAULT_SETTINGS,
   maxConcurrency: 6,
   outputDirectoryStrategy: 'custom',
+  defaultOutputDirectory: '/saved/output',
   rememberLastParams: true
 } as const;
 
@@ -12,6 +13,7 @@ const savedSettings = {
   ...DEFAULT_SETTINGS,
   maxConcurrency: 4,
   outputDirectoryStrategy: 'custom',
+  defaultOutputDirectory: '/saved/output',
   rememberLastParams: true
 } as const;
 
@@ -48,6 +50,7 @@ describe('settingsStore', () => {
       expect.objectContaining({
         maxConcurrency: 6,
         outputDirectoryStrategy: 'custom',
+        defaultOutputDirectory: '/saved/output',
         rememberLastParams: true,
         isLoading: false,
         errorMessage: null
@@ -62,6 +65,7 @@ describe('settingsStore', () => {
     await store.getState().updateSettings({
       maxConcurrency: 4,
       outputDirectoryStrategy: 'custom',
+      defaultOutputDirectory: '/saved/output',
       rememberLastParams: true
     });
 
@@ -70,6 +74,7 @@ describe('settingsStore', () => {
       expect.objectContaining({
         maxConcurrency: 4,
         outputDirectoryStrategy: 'custom',
+        defaultOutputDirectory: '/saved/output',
         rememberLastParams: true,
         errorMessage: null
       })

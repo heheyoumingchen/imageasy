@@ -41,8 +41,8 @@ const inspectedJpgFile = {
 };
 
 // 公共任务设置（命名规则/导出格式/色彩模式/输出质量）现在统一来自 settings store。
-const setConversionSettings = (partial: Partial<typeof DEFAULT_SETTINGS.conversion>) => {
-  getSettingsStore().setState({ conversion: { ...DEFAULT_SETTINGS.conversion, ...partial } });
+const setConversionSettings = (partial: Partial<typeof DEFAULT_SETTINGS.exportSettings>) => {
+  getSettingsStore().setState({ exportSettings: { ...DEFAULT_SETTINGS.exportSettings, ...partial } });
 };
 
 describe('ConvertImagePage', () => {
@@ -53,7 +53,7 @@ describe('ConvertImagePage', () => {
       language: 'zh-CN',
       outputDirectoryStrategy: 'same-as-source',
       maxConcurrency: 2,
-      conversion: { ...DEFAULT_SETTINGS.conversion }
+      exportSettings: { ...DEFAULT_SETTINGS.exportSettings }
     });
     useConversionStore.getState().reset();
   });
@@ -61,7 +61,7 @@ describe('ConvertImagePage', () => {
   it('renders the conversion workbench without crashing', () => {
     render(<ConvertImagePage />);
 
-    expect(screen.getByText('文件列表')).toBeInTheDocument();
+    expect(screen.queryByText('文件列表')).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: '添加文件' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '开始转换' })).toBeDisabled();
   });
@@ -106,8 +106,28 @@ describe('ConvertImagePage', () => {
     expect(await screen.findByText('a.jpg')).toBeInTheDocument();
     expect(screen.getByText('b.pdf')).toBeInTheDocument();
     expect(screen.getAllByRole('checkbox', { checked: true })).toHaveLength(2);
-    // 输出目录不再有面板输入框，改为在底部状态栏展示从源推断的目录。
-    expect(screen.getByText('F:/demo/folder')).toBeInTheDocument();
+  });
+
+  it('appends newly imported files without replacing existing conversion items', async () => {
+    const user = userEvent.setup();
+    vi.mocked(openConversionSources)
+      .mockResolvedValueOnce({ files: ['F:/demo/a.jpg'], directories: [], cancelled: false })
+      .mockResolvedValueOnce({ files: ['F:/demo/b.jpg'], directories: [], cancelled: false });
+    vi.mocked(inspectConversionFile).mockImplementation(async (path: string) => ({
+      ...inspectedJpgFile,
+      sourcePath: path,
+      sourceName: path.endsWith('b.jpg') ? 'b.jpg' : 'a.jpg'
+    }));
+
+    render(<ConvertImagePage />);
+    await user.click(screen.getByRole('button', { name: '添加文件' }));
+    expect(await screen.findByText('a.jpg')).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: '添加文件' }));
+
+    expect(await screen.findByText('a.jpg')).toBeInTheDocument();
+    expect(await screen.findByText('b.jpg')).toBeInTheDocument();
+    expect(screen.getAllByRole('checkbox', { checked: true })).toHaveLength(2);
   });
 
   it('imports dropped folders through the empty conversion area', async () => {
@@ -134,7 +154,6 @@ describe('ConvertImagePage', () => {
     dragDropHandler({ payload: { type: 'drop', paths: ['F:/drop'] } });
 
     expect(await screen.findByText('a.jpg')).toBeInTheDocument();
-    expect(screen.getByText('F:/drop')).toBeInTheDocument();
   });
 
   it('skips unsupported conversion files during add-file import', async () => {
@@ -169,14 +188,12 @@ describe('ConvertImagePage', () => {
     await user.click(screen.getByRole('button', { name: '添加文件' }));
 
     expect(await screen.findByText('a.jpg')).toBeInTheDocument();
-    expect(await screen.findByText('F:/demo')).toBeInTheDocument();
     expect(startButton).toBeEnabled();
   });
 
-  it('prompts for an output directory at start under the custom strategy when empty', async () => {
+  it('uses the fixed default output directory from settings under the custom strategy', async () => {
     const user = userEvent.setup();
-    getSettingsStore().setState({ outputDirectoryStrategy: 'custom' });
-    vi.mocked(chooseOutputDirectory).mockResolvedValue('F:/picked');
+    getSettingsStore().setState({ outputDirectoryStrategy: 'custom', defaultOutputDirectory: 'F:/picked' });
     vi.mocked(convertImageFile).mockResolvedValue(['F:/picked/a-001.jpg']);
 
     render(<ConvertImagePage />);
@@ -200,15 +217,13 @@ describe('ConvertImagePage', () => {
       ]);
     });
 
-    // custom 策略下即便输出目录为空，开始按钮也可用（开始时再弹框）。
+    // custom 策略下使用设置页保存的固定目录，不再在栏目页弹框选择。
     const startButton = screen.getByRole('button', { name: '开始转换' });
     expect(startButton).toBeEnabled();
 
     await user.click(startButton);
 
-    await waitFor(() => {
-      expect(chooseOutputDirectory).toHaveBeenCalledTimes(1);
-    });
+    expect(chooseOutputDirectory).not.toHaveBeenCalled();
     await waitFor(() => {
       expect(convertImageFile).toHaveBeenCalledWith(
         expect.objectContaining({ outputPath: 'F:/picked/a-001.jpg' })
@@ -230,26 +245,22 @@ describe('ConvertImagePage', () => {
     expect(openDirectoryInSystem).toHaveBeenCalledWith('F:/demo');
   });
 
-  it('renders only the page-range control in the settings panel and the status footer', async () => {
-    const { container } = render(<ConvertImagePage />);
+  it('renders the page-range control above the toolbar and the file list area', async () => {
+    render(<ConvertImagePage />);
 
     expect(screen.queryByRole('heading', { name: '格式转换' })).not.toBeInTheDocument();
     const importButton = screen.getByRole('button', { name: '添加文件' });
     const clearButton = screen.getByRole('button', { name: '清空列表' });
     const startButton = screen.getByRole('button', { name: '开始转换' });
+    const openOutputButton = screen.getByRole('button', { name: '打开输出目录' });
     expect(importButton).toBeInTheDocument();
     expect(clearButton).toBeInTheDocument();
     expect(startButton.className).toContain('h-10');
-    expect(startButton.className).toContain('w-full');
-    const startIcon = startButton.querySelector('svg');
-    expect(startIcon).not.toBeNull();
-    expect(startIcon?.className.baseVal ?? '').toContain('lucide-play');
-    expect(
-      Array.from(container.querySelectorAll('div')).some((element) => element.className.includes('xl:grid-cols-[1fr_380px]'))
-    ).toBe(true);
-    expect(screen.getByText('文件列表')).toBeInTheDocument();
+    expect(openOutputButton).toBeInTheDocument();
+
+    // 去掉了「文件列表」字样标题，列表区直接承载条目。
+    expect(screen.queryByText('文件列表')).not.toBeInTheDocument();
     expect(screen.getByText('转换设置')).toBeInTheDocument();
-    expect(screen.getByText('全局进度')).toBeInTheDocument();
 
     // 已迁移到设置页的公共参数不再出现在转换设置面板中。
     expect(screen.queryByLabelText('输出格式')).not.toBeInTheDocument();
@@ -261,11 +272,11 @@ describe('ConvertImagePage', () => {
     expect(screen.queryByRole('button', { name: '选择路径' })).not.toBeInTheDocument();
     expect(screen.queryByLabelText('DPI')).not.toBeInTheDocument();
 
-    // 页范围仍是转换专属参数，保留在面板中。
+    // 页范围仍是转换专属参数，保留在功能区第一排。无文档（PDF/PPT）时默认禁用。
     expect(screen.getByRole('button', { name: '全选页' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '页码范围' })).toBeInTheDocument();
     expect(screen.getByLabelText('页码范围输入')).toBeDisabled();
-    expect(screen.getByRole('complementary', { name: '转换设置区' }).className).toContain('p-5');
+    expect(screen.getByRole('complementary', { name: '转换设置区' }).className).toContain('px-5');
 
     const pageRangeRow = screen.getByTestId('page-range-row');
     const pageRangeInput = screen.getByLabelText('页码范围输入');
@@ -273,25 +284,7 @@ describe('ConvertImagePage', () => {
     expect(pageRangeInput.className).toContain('min-w-0');
     expect(pageRangeInput.className).toContain('w-full');
 
-    const batchProgressPanel = screen.getByTestId('batch-progress-panel');
-    expect(batchProgressPanel.className).toContain('lg:w-[560px]');
-
-    const batchProgressFooter = screen.getByTestId('batch-progress-footer');
-    const openOutputButton = within(batchProgressFooter).getByRole('button', { name: '打开输出目录' });
-    const retryFailedButton = within(batchProgressFooter).getByRole('button', { name: '重试失败项' });
-    const failedDetailsButton = within(batchProgressFooter).getByRole('button', { name: '错误详情' });
-
     expect(openOutputButton).toBeDisabled();
-    expect(retryFailedButton).toBeDisabled();
-    expect(failedDetailsButton).toBeEnabled();
-
-    const footer = screen.getByRole('contentinfo', { name: '转换任务页状态栏' });
-    expect(
-      within(footer).getByText((_, element) => element?.tagName === 'SPAN' && element.textContent === '当前任务: 格式转换')
-    ).toBeInTheDocument();
-    expect(
-      within(footer).getByText((_, element) => element?.tagName === 'SPAN' && element.textContent === '输出目录: --')
-    ).toBeInTheDocument();
   });
 
   it('imports mixed files and renders unified list entries from settings-store defaults', async () => {
@@ -427,9 +420,9 @@ describe('ConvertImagePage', () => {
     await screen.findByText('a.jpg');
     await user.click(await screen.findByRole('button', { name: '开始转换' }));
 
-    const progressCard = screen.getByText('全局进度').closest('div[class*="bg-white"]');
+    // 新布局没有全局进度卡片，转换完成后列表项状态变为「已完成」。
     await waitFor(() => {
-      expect(within(progressCard as HTMLElement).getByText('100%')).toBeInTheDocument();
+      expect(screen.getAllByText('已完成')).toHaveLength(2);
     });
   });
 
@@ -492,7 +485,7 @@ describe('ConvertImagePage', () => {
     });
   });
 
-  it('expands error details and shows empty state or failed item messages', async () => {
+  it('shows the failure message inline on the list item when a conversion fails', async () => {
     const user = userEvent.setup();
     let rejectConversion: ((reason?: unknown) => void) | undefined;
 
@@ -507,9 +500,6 @@ describe('ConvertImagePage', () => {
 
     render(<ConvertImagePage />);
 
-    await user.click(screen.getByRole('button', { name: '错误详情' }));
-    expect(screen.getByText('当前没有失败项。')).toBeInTheDocument();
-
     await user.click(screen.getByRole('button', { name: '添加文件' }));
     await screen.findByText('a.jpg');
     await user.click(screen.getByRole('button', { name: '开始转换' }));
@@ -522,10 +512,9 @@ describe('ConvertImagePage', () => {
       rejectConversion?.(new Error('磁盘空间不足'));
     });
 
-    const failedDetailsDialog = await screen.findByRole('dialog', { name: '错误详情' });
-    expect(within(failedDetailsDialog).getByText('a.jpg')).toBeInTheDocument();
-    expect(within(failedDetailsDialog).getByText('磁盘空间不足')).toBeInTheDocument();
-    expect(screen.queryByRole('region', { name: '错误详情' })).not.toBeInTheDocument();
+    // 新布局没有错误详情弹窗，失败信息直接显示在列表项上。
+    expect(await screen.findByText('磁盘空间不足')).toBeInTheDocument();
+    expect(screen.getByText('失败')).toBeInTheDocument();
   });
 
   it('runs ready items with the configured batch concurrency', async () => {
@@ -738,24 +727,32 @@ describe('ConvertImagePage', () => {
     const user = userEvent.setup();
     let releaseConversion: (() => void) | undefined;
 
-    vi.mocked(openConversionFiles).mockResolvedValue(['F:/demo/a.jpg']);
-    vi.mocked(inspectConversionFile).mockResolvedValue(inspectedJpgFile);
-    vi.mocked(convertImageFile).mockImplementation(
+    // 页码范围仅对文档类生效，这里导入 PDF 让控件可用，再验证运行时被禁用。
+    vi.mocked(openConversionFiles).mockResolvedValue(['F:/demo/b.pdf']);
+    vi.mocked(inspectConversionFile).mockResolvedValue({
+      kind: 'document',
+      sourcePath: 'F:/demo/b.pdf',
+      sourceName: 'b.pdf',
+      imageMetadata: null,
+      documentMetadata: { pageCount: 3, extension: 'pdf' },
+      errorMessage: null
+    });
+    vi.mocked(renderDocumentToImages).mockImplementation(
       () =>
         new Promise((resolve) => {
-          releaseConversion = () => resolve(['F:/demo/a.jpg']);
+          releaseConversion = () => resolve(['F:/demo/b_001.jpg']);
         })
     );
 
     render(<ConvertImagePage />);
     await user.click(screen.getByRole('button', { name: '添加文件' }));
-    await screen.findByText('a.jpg');
+    await screen.findByText('b.pdf');
     await user.click(screen.getByRole('button', { name: '页码范围' }));
     await user.type(screen.getByLabelText('页码范围输入'), '1-2');
     await user.click(screen.getByRole('button', { name: '开始转换' }));
 
     await waitFor(() => {
-      expect(convertImageFile).toHaveBeenCalledTimes(1);
+      expect(renderDocumentToImages).toHaveBeenCalledTimes(1);
     });
 
     expect(screen.getByRole('button', { name: '全选页' })).toBeDisabled();
@@ -778,12 +775,12 @@ describe('ConvertImagePage design polish', () => {
     getSettingsStore().setState({
       language: 'zh-CN',
       outputDirectoryStrategy: 'same-as-source',
-      conversion: { ...DEFAULT_SETTINGS.conversion }
+      exportSettings: { ...DEFAULT_SETTINGS.exportSettings }
     });
     useConversionStore.getState().reset();
   });
 
-  it('keeps the page range inline like the design and renders the batch progress panel', () => {
+  it('keeps the page range inline like the design above the toolbar', () => {
     render(<ConvertImagePage />);
 
     const pageRangeRow = screen.getByTestId('page-range-row');
@@ -798,14 +795,9 @@ describe('ConvertImagePage design polish', () => {
     expect(pageRangeInput.className).toContain('min-w-0');
     expect(pageRangeInput.className).toContain('w-full');
 
-    const batchProgressPanel = screen.getByTestId('batch-progress-panel');
-    expect(batchProgressPanel.className).toContain('lg:w-[560px]');
-
-    const batchProgressFooter = screen.getByTestId('batch-progress-footer');
-    expect(within(batchProgressFooter).getByText('全局进度')).toBeInTheDocument();
-    expect(within(batchProgressFooter).getByText('0%')).toBeInTheDocument();
-    expect(within(batchProgressFooter).getByRole('button', { name: '打开输出目录' })).toBeDisabled();
-    expect(within(batchProgressFooter).getByRole('button', { name: '错误详情' })).toBeEnabled();
-    expect(within(batchProgressFooter).getByRole('button', { name: '重试失败项' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: '添加文件' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '清空列表' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '开始转换' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: '打开输出目录' })).toBeDisabled();
   });
 });

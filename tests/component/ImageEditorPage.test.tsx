@@ -61,6 +61,7 @@ vi.mock('../../src/services/fileDialog', () => ({
 vi.mock('../../src/services/editorCommands', () => ({
   openImageSession: vi.fn(),
   generateImagePreview: vi.fn(),
+  prefetchImagePreview: vi.fn().mockResolvedValue(undefined),
   saveImageAsJpg: vi.fn(),
   commitCropToWorkingImage: vi.fn()
 }));
@@ -80,7 +81,8 @@ const destructiveCropFixture = {
 };
 
 const previewFixture = {
-  dataUrl: 'data:image/jpeg;base64,preview-a',
+  previewPath: 'C:/temp/imageasy/editor-previews/preview_a.jpg',
+  previewUrl: 'asset://localhost/C:/temp/imageasy/editor-previews/preview_a.jpg',
   width: 720,
   height: 540
 };
@@ -99,6 +101,25 @@ describe('ImageEditorPage redesign layout', () => {
     vi.mocked(openImageSession).mockResolvedValue(editorSessionFixture);
     vi.mocked(saveImageAsJpg).mockResolvedValue(savedJpgFixture);
     vi.mocked(commitCropToWorkingImage).mockResolvedValue(destructiveCropFixture);
+  });
+
+  it('requests the main preview immediately after opening an image', async () => {
+    const user = userEvent.setup();
+    vi.mocked(openImageFile).mockResolvedValue('F:/Demo/示例图片_A.jpg');
+
+    render(<ImageEditorPage />);
+    await user.click(screen.getByRole('button', { name: '打开' }));
+
+    await waitFor(() => {
+      expect(openImageSession).toHaveBeenCalledTimes(1);
+    });
+    expect(generateImagePreview).toHaveBeenCalledTimes(1);
+    expect(generateImagePreview).toHaveBeenCalledWith({
+      path: 'F:/Demo/示例图片_A.jpg',
+      adjustments: expect.objectContaining({ brightness: 0, filterType: 'none' }),
+      maxWidth: 760,
+      maxHeight: 560
+    });
   });
 
   it('renders a streamlined filmstrip and status bar after opening an image', async () => {

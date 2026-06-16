@@ -1,10 +1,14 @@
-use super::common::{current_date_stamp, extension, normalized_format, write_dynamic_image};
+use super::common::{apply_color_mode, current_date_stamp, extension, normalized_format, write_dynamic_image};
 use anyhow::{Context, Result};
+use base64::{engine::general_purpose::STANDARD, Engine as _};
+use image::codecs::jpeg::JpegEncoder;
 use image::imageops::{self, FilterType};
-use image::{DynamicImage, GenericImageView, ImageBuffer, Rgba};
+use image::{DynamicImage, ImageBuffer, Rgba};
+use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::{
     fs,
+    io::Cursor,
     path::{Path, PathBuf},
 };
 use walkdir::WalkDir;
@@ -26,7 +30,12 @@ pub struct InspectStitchingFileResult {
     pub source_path: String,
     pub source_name: String,
     pub image_metadata: Option<StitchingImageMetadata>,
+    pub thumbnail: Option<String>,
     pub error_message: Option<String>,
+}
+
+fn default_scale() -> f32 {
+    1.0
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -37,6 +46,38 @@ pub struct StitchLayoutCell {
     pub col: u32,
     pub row_span: u32,
     pub col_span: u32,
+    // 方格内图片的缩放与位移（编辑模式）。scale>=1，offset 以方格尺寸的比例表示（-0.5~0.5）。
+    #[serde(default = "default_scale")]
+    pub scale: f32,
+    #[serde(default)]
+    pub offset_x: f32,
+    #[serde(default)]
+    pub offset_y: f32,
+}
+
+fn create_stitching_thumbnail_data_url(path: &Path) -> Result<String> {
+    let image = image::open(path)
+        .with_context(|| format!("无法生成拼接缩略图: {}", path.display()))?;
+    let thumbnail = image.resize(360, 360, FilterType::CatmullRom);
+    let mut buffer = Cursor::new(Vec::new());
+    let mut encoder = JpegEncoder::new_with_quality(&mut buffer, 58);
+    encoder.encode_image(&thumbnail)?;
+    let encoded = STANDARD.encode(buffer.into_inner());
+    Ok(format!("data:image/jpeg;base64,{encoded}"))
+}
+
+fn inspect_image_metadata(path: &Path, source_name: String) -> Result<InspectStitchingFileResult> {
+    let dimensions = image::image_dimensions(path)
+        .with_context(|| format!("无法读取图片尺寸: {}", source_name))?;
+    Ok(InspectStitchingFileResult {
+        kind: "image".into(),
+        source_path: path.to_string_lossy().into_owned(),
+        source_name,
+        image_metadata: Some(StitchingImageMetadata { width: dimensions.0, height: dimensions.1, extension: extension(path) }),
+        // 禁止用 Tauri asset URL 直接预览本地图片；导入阶段返回小尺寸 data URL 缩略图。
+        thumbnail: Some(create_stitching_thumbnail_data_url(path)?),
+        error_message: None,
+    })
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -52,6 +93,7 @@ pub struct StitchImageFilesRequest {
     pub border_radius: u32,
     pub background_color: String,
     pub quality: u8,
+    pub color_mode: String,
     pub output_directory: String,
     pub output_format: String,
     pub naming_pattern: String,
@@ -65,13 +107,21 @@ pub struct StitchImageFilesResult {
 }
 
 #[tauri::command]
-pub fn inspect_stitching_file(path: String) -> Result<InspectStitchingFileResult, String> {
-    inspect_stitching_file_impl(&path).map_err(|error| error.to_string())
+pub async fn inspect_stitching_file(path: String) -> Result<InspectStitchingFileResult, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        inspect_stitching_file_impl(&path).map_err(|error| error.to_string())
+    })
+    .await
+    .map_err(|error| error.to_string())?
 }
 
 #[tauri::command]
-pub fn inspect_stitching_directory(path: String) -> Result<Vec<InspectStitchingFileResult>, String> {
-    inspect_stitching_directory_impl(&path).map_err(|error| error.to_string())
+pub async fn inspect_stitching_directory(path: String) -> Result<Vec<InspectStitchingFileResult>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        inspect_stitching_directory_impl(&path).map_err(|error| error.to_string())
+    })
+    .await
+    .map_err(|error| error.to_string())?
 }
 
 #[tauri::command]
@@ -101,15 +151,7 @@ fn inspect_stitching_file_impl(path: &str) -> Result<InspectStitchingFileResult>
     let source = PathBuf::from(path);
     let source_name = source_name(&source, path);
     if is_supported_image(&source) {
-        let image = image::open(&source).with_context(|| format!("无法打开图片: {}", source.display()))?;
-        let (width, height) = image.dimensions();
-        return Ok(InspectStitchingFileResult {
-            kind: "image".into(),
-            source_path: path.into(),
-            source_name,
-            image_metadata: Some(StitchingImageMetadata { width, height, extension: extension(&source) }),
-            error_message: None,
-        });
+        return inspect_image_metadata(&source, source_name);
     }
 
     Ok(InspectStitchingFileResult {
@@ -117,17 +159,24 @@ fn inspect_stitching_file_impl(path: &str) -> Result<InspectStitchingFileResult>
         source_path: path.into(),
         source_name,
         image_metadata: None,
+        thumbnail: None,
         error_message: Some("不支持的文件类型".into()),
     })
 }
 
 fn inspect_stitching_directory_impl(path: &str) -> Result<Vec<InspectStitchingFileResult>> {
-    let mut items = WalkDir::new(path)
+    // 先收集候选路径，再用 rayon 并行解码生成缩略图，加速大目录导入。
+    let candidates: Vec<PathBuf> = WalkDir::new(path)
         .into_iter()
         .filter_map(|entry| entry.ok())
         .filter(|entry| entry.file_type().is_file())
         .filter(|entry| is_supported_image(entry.path()))
-        .map(|entry| inspect_stitching_file_impl(&entry.path().to_string_lossy()))
+        .map(|entry| entry.into_path())
+        .collect();
+
+    let mut items = candidates
+        .par_iter()
+        .map(|candidate| inspect_stitching_file_impl(&candidate.to_string_lossy()))
         .collect::<Result<Vec<_>>>()?;
 
     items.sort_by(|left, right| left.source_name.cmp(&right.source_name));
@@ -228,14 +277,36 @@ fn inside_rounded_rect(x: u32, y: u32, width: u32, height: u32, radius: u32) -> 
     }
 }
 
-fn object_cover(image: &DynamicImage, target_width: u32, target_height: u32) -> DynamicImage {
-    let scale = (target_width as f32 / image.width() as f32).max(target_height as f32 / image.height() as f32);
-    let resize_width = ((image.width() as f32 * scale).ceil() as u32).max(target_width);
-    let resize_height = ((image.height() as f32 * scale).ceil() as u32).max(target_height);
-    let resized = image.resize(resize_width, resize_height, FilterType::Lanczos3);
-    let crop_x = resized.width().saturating_sub(target_width) / 2;
-    let crop_y = resized.height().saturating_sub(target_height) / 2;
-    resized.crop_imm(crop_x, crop_y, target_width, target_height)
+// 在 contain（完整适配、留白）基础上应用缩放与自由位移。
+// scale>=1 放大图片；offset_x/offset_y 以方格尺寸的比例（-1~1）自由平移，
+// 空出区域保持透明，露出画布背景色，与前端预览语义一致。
+fn object_contain_transform(
+    image: &DynamicImage,
+    target_width: u32,
+    target_height: u32,
+    scale: f32,
+    offset_x: f32,
+    offset_y: f32,
+) -> DynamicImage {
+    let scale = scale.clamp(1.0, 6.0);
+    let offset_x = offset_x.clamp(-1.0, 1.0);
+    let offset_y = offset_y.clamp(-1.0, 1.0);
+
+    let contain_scale = (target_width as f32 / image.width() as f32)
+        .min(target_height as f32 / image.height() as f32)
+        * scale;
+    let resize_width = ((image.width() as f32 * contain_scale).round() as u32).max(1);
+    let resize_height = ((image.height() as f32 * contain_scale).round() as u32).max(1);
+    let resized = image.resize_exact(resize_width, resize_height, FilterType::Lanczos3);
+
+    // 透明底图，居中放置后按 offset 比例平移；越界部分由 overlay 自动裁剪。
+    let mut tile = ImageBuffer::from_pixel(target_width, target_height, Rgba([0, 0, 0, 0]));
+    let center_x = (target_width as f32 - resize_width as f32) / 2.0;
+    let center_y = (target_height as f32 - resize_height as f32) / 2.0;
+    let paste_x = (center_x + offset_x * target_width as f32).round() as i64;
+    let paste_y = (center_y + offset_y * target_height as f32).round() as i64;
+    imageops::overlay(&mut tile, &resized.to_rgba8(), paste_x, paste_y);
+    DynamicImage::ImageRgba8(tile)
 }
 
 fn overlay_rounded(canvas: &mut DynamicImage, image: &DynamicImage, rect: Rect, radius: u32) {
@@ -322,8 +393,8 @@ fn stitch_image_files_impl(request: StitchImageFilesRequest) -> Result<StitchIma
             first_source = Some(source.clone());
         }
         let image = image::open(&source).with_context(|| format!("无法打开图片: {}", source_name(&source, &cell.source_path)))?;
-        let cropped = object_cover(&image, rect.width, rect.height);
-        overlay_rounded(&mut canvas, &cropped, rect, request.border_radius);
+        let placed = object_contain_transform(&image, rect.width, rect.height, cell.scale, cell.offset_x, cell.offset_y);
+        overlay_rounded(&mut canvas, &placed, rect, request.border_radius);
         stitched_count += 1;
     }
 
@@ -332,6 +403,7 @@ fn stitch_image_files_impl(request: StitchImageFilesRequest) -> Result<StitchIma
         .with_context(|| format!("无法创建输出目录: {}", output_directory.display()))?;
     let base_stem = first_source.as_ref().map(|path| stem(path)).unwrap_or_else(|| "stitched".into());
     let output_path = next_output_path(&output_directory, &base_stem, &request);
+    let canvas = apply_color_mode(canvas, &request.color_mode);
     write_dynamic_image(&output_path, &canvas, &request.output_format, Some(request.quality))?;
 
     Ok(StitchImageFilesResult {

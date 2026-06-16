@@ -1,11 +1,11 @@
 import { useMemo, useState } from 'react';
 import { extractDocumentImages, inspectExtractionDirectory, inspectExtractionDocument } from '../services/extractionCommands';
-import { chooseOutputDirectory, openDirectoryInSystem, openExtractionDocuments, openExtractionSources } from '../services/fileDialog';
+import { openDirectoryInSystem, openExtractionDocuments, openExtractionSources } from '../services/fileDialog';
 import { useDragDropImport } from './useDragDropImport';
 import { getSettingsStore } from './useSettingsStore';
 import { sourceDirectory, sourceName } from '../utils/paths';
 import { toErrorMessage } from '../utils/errors';
-import type { ExtractionDocumentInfo } from '../types/extraction';
+import type { ExtractionDocumentInfo, ExtractionOutputFormat } from '../types/extraction';
 
 export type ExtractionItem = ExtractionDocumentInfo & {
   status: 'ready' | 'running' | 'success' | 'failed';
@@ -106,16 +106,20 @@ export const useExtractionWorkflow = () => {
     for (const path of sourceFiles) {
       try {
         const documentInfo = await inspectExtractionDocument(path);
-        setItems((current) => [...current, createExtractionItem(documentInfo)]);
+        setItems((current) => current.some((item) => item.sourcePath === documentInfo.sourcePath) ? current : [...current, createExtractionItem(documentInfo)]);
       } catch {
       }
     }
     for (const path of sources.directories) {
       try {
         const directoryItems = await inspectExtractionDirectory(path);
-        setItems((current) => [...current, ...directoryItems.map(createExtractionItem)]);
+        setItems((current) => {
+          const existing = new Set(current.map((item) => item.sourcePath));
+          const fresh = directoryItems.filter((info) => !existing.has(info.sourcePath));
+          return [...current, ...fresh.map(createExtractionItem)];
+        });
       } catch (error) {
-        setItems((current) => [...current, createFailedExtractionItem(fallbackDocumentInfo(path), error)]);
+        setItems((current) => current.some((item) => item.sourcePath === path) ? current : [...current, createFailedExtractionItem(fallbackDocumentInfo(path), error)]);
       }
     }
     if (!outputDirectoryManual && sources.directories[0]) {
@@ -151,17 +155,9 @@ export const useExtractionWorkflow = () => {
   };
 
   const startExtraction = async (selectOutputDirectoryError: string) => {
-    const { extraction, outputDirectoryStrategy } = getSettingsStore().getState();
+    const { exportSettings, outputDirectoryStrategy, defaultOutputDirectory } = getSettingsStore().getState();
 
-    let targetDirectory = outputDirectory;
-    if (!targetDirectory && outputDirectoryStrategy === 'custom') {
-      const selected = await chooseOutputDirectory(undefined);
-      if (selected) {
-        setOutputDirectory(selected);
-        setOutputDirectoryManual(true);
-        targetDirectory = selected;
-      }
-    }
+    const targetDirectory = outputDirectoryStrategy === 'custom' ? defaultOutputDirectory : outputDirectory;
 
     if (!targetDirectory) {
       setPageError(selectOutputDirectoryError);
@@ -180,9 +176,11 @@ export const useExtractionWorkflow = () => {
         const result = await extractDocumentImages({
           sourcePath: item.sourcePath,
           outputDirectory: targetDirectory,
-          outputFormat: extraction.outputFormat,
-          colorMode: extraction.colorMode,
-          namingPattern: extraction.namingPattern
+          outputFormat: exportSettings.outputFormat as ExtractionOutputFormat,
+          colorMode: exportSettings.colorMode,
+          quality: exportSettings.quality,
+          namingPattern: exportSettings.namingPattern,
+          includeOutputPaths: false
         });
         setItems((current) => markExtractionItemSucceeded(current, item.sourcePath, result.extractedCount));
       } catch (error) {

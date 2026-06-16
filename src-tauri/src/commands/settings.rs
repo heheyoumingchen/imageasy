@@ -2,36 +2,13 @@ use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::{fs, path::{Path, PathBuf}};
 
+// 四个功能（转换 / 提取 / 分割 / 拼接）现已共享同一份导出设置。
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
-pub struct ConversionTaskSettings {
+pub struct ExportTaskSettings {
     pub naming_pattern: String,
     pub output_format: String,
     pub color_mode: String,
-    pub quality: u8,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-pub struct ExtractionTaskSettings {
-    pub naming_pattern: String,
-    pub output_format: String,
-    pub color_mode: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-pub struct SplittingTaskSettings {
-    pub naming_pattern: String,
-    pub output_format: String,
-    pub quality: u8,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-pub struct StitchingTaskSettings {
-    pub naming_pattern: String,
-    pub output_format: String,
     pub quality: u8,
 }
 
@@ -42,46 +19,18 @@ pub struct PersistedSettings {
     pub language: String,
     pub max_concurrency: u8,
     pub output_directory_strategy: String,
+    #[serde(default)]
+    pub default_output_directory: String,
     pub remember_last_params: bool,
-    #[serde(default = "default_conversion_task")]
-    pub conversion: ConversionTaskSettings,
-    #[serde(default = "default_extraction_task")]
-    pub extraction: ExtractionTaskSettings,
-    #[serde(default = "default_splitting_task")]
-    pub splitting: SplittingTaskSettings,
-    #[serde(default = "default_stitching_task")]
-    pub stitching: StitchingTaskSettings,
+    #[serde(default = "default_export_task")]
+    pub export_settings: ExportTaskSettings,
 }
 
-fn default_conversion_task() -> ConversionTaskSettings {
-    ConversionTaskSettings {
+fn default_export_task() -> ExportTaskSettings {
+    ExportTaskSettings {
         naming_pattern: "source-name-index".into(),
         output_format: "jpg".into(),
         color_mode: "rgb".into(),
-        quality: 100,
-    }
-}
-
-fn default_extraction_task() -> ExtractionTaskSettings {
-    ExtractionTaskSettings {
-        naming_pattern: "source-name-index".into(),
-        output_format: "jpg".into(),
-        color_mode: "rgb".into(),
-    }
-}
-
-fn default_splitting_task() -> SplittingTaskSettings {
-    SplittingTaskSettings {
-        naming_pattern: "source-name-index".into(),
-        output_format: "png".into(),
-        quality: 100,
-    }
-}
-
-fn default_stitching_task() -> StitchingTaskSettings {
-    StitchingTaskSettings {
-        naming_pattern: "source-name-index".into(),
-        output_format: "jpg".into(),
         quality: 100,
     }
 }
@@ -92,11 +41,23 @@ fn default_settings() -> PersistedSettings {
         language: "zh-CN".into(),
         max_concurrency: 2,
         output_directory_strategy: "same-as-source".into(),
+        default_output_directory: String::new(),
         remember_last_params: false,
-        conversion: default_conversion_task(),
-        extraction: default_extraction_task(),
-        splitting: default_splitting_task(),
-        stitching: default_stitching_task(),
+        export_settings: default_export_task(),
+    }
+}
+
+// 旧版本设置文件以 conversion/extraction/splitting/stitching 四块分别持久化。
+// 迁移时优先沿用 conversion 作为统一导出设置，避免老配置丢失。
+fn migrate_legacy_settings(value: &mut serde_json::Value) {
+    let Some(object) = value.as_object_mut() else {
+        return;
+    };
+    if object.contains_key("exportSettings") {
+        return;
+    }
+    if let Some(legacy) = object.get("conversion").cloned() {
+        object.insert("exportSettings".into(), legacy);
     }
 }
 
@@ -129,7 +90,10 @@ pub fn load_settings_from_path(path: &Path) -> Result<PersistedSettings> {
 
     let raw = fs::read_to_string(path)
         .with_context(|| format!("无法读取设置文件: {}", path.display()))?;
-    let settings = serde_json::from_str(&raw)
+    let mut value: serde_json::Value = serde_json::from_str(&raw)
+        .with_context(|| format!("无法解析设置文件: {}", path.display()))?;
+    migrate_legacy_settings(&mut value);
+    let settings = serde_json::from_value(value)
         .with_context(|| format!("无法解析设置文件: {}", path.display()))?;
 
     Ok(settings)

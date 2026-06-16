@@ -11,8 +11,11 @@ type CacheCardProps = {
 };
 
 export const CacheCard = ({ copy, cacheSizeText, isLoading, onClear }: CacheCardProps) => (
-  <section className="bg-white rounded border border-border-light px-8 py-5">
-    <h2 className="text-lg font-bold text-[#1A1D23] mb-2">{copy.cacheTitle}</h2>
+  <section data-testid="settings-cache-card" className="px-8 py-5">
+    <h2 className="text-xl font-bold text-[#1A1D23] mb-2 flex items-center gap-3">
+      <div className="w-1.5 h-6 bg-meitu rounded-full" />
+      {copy.cacheTitle}
+    </h2>
     <div className="flex items-center gap-4">
       <div className="h-10 w-10 shrink-0 rounded-lg bg-meitu-light flex items-center justify-center">
         <svg viewBox="0 0 20 20" fill="currentColor" className="w-5 h-5 text-meitu">

@@ -25,10 +25,13 @@ const ActionButton = ({ children, onClick }: { children: ReactNode; onClick?: ()
 );
 
 export const AboutCard = ({ copy, onOpenContact }: AboutCardProps) => (
-  <section className="bg-white rounded border border-border-light px-8 py-5">
+  <section className="px-8 py-5">
     <div className="flex items-center justify-between">
       <div>
-        <h2 className="text-lg font-bold text-[#1A1D23] mb-2">{copy.aboutApp}</h2>
+        <h2 className="text-title-2 mb-2 flex items-center gap-3">
+          <div className="w-1.5 h-6 bg-meitu rounded-full" />
+          {copy.aboutApp}
+        </h2>
         <div data-testid="about-app-identity" className="flex items-center gap-3 text-left">
           <img src="/brand/logo.png" alt="imageasy logo" className="h-14 w-14 shrink-0 rounded-xl object-cover" />
           <div className="min-w-0">

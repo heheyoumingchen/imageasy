@@ -12,6 +12,7 @@ type ImagePreviewCanvasProps = {
   error: string | null;
   scale: number;
   isCropping: boolean;
+  cssFilter?: string;
   onCroppingChange: (value: boolean) => void;
   onApplyCrop: (crop: CropRect | null) => void | Promise<void>;
 };
@@ -75,6 +76,7 @@ const ImagePreviewCanvas = ({
   error,
   scale,
   isCropping,
+  cssFilter,
   onCroppingChange,
   onApplyCrop
 }: ImagePreviewCanvasProps) => {
@@ -85,12 +87,20 @@ const ImagePreviewCanvas = ({
   const cropInteractionRef = useRef<CropInteraction | null>(null);
   const viewportRef = useRef<HTMLDivElement | null>(null);
   const previewImageRef = useRef<HTMLImageElement | null>(null);
+  const previewContainerRef = useRef<HTMLDivElement | null>(null);
+  const offsetRef = useRef({ x: 0, y: 0 });
+  const rafIdRef = useRef<number | null>(null);
 
   useEffect(() => {
     setOffset({ x: 0, y: 0 });
+    offsetRef.current = { x: 0, y: 0 };
     setDraftCrop(isCropping ? adjustments.crop ?? buildDefaultCrop(image) : adjustments.crop);
     dragOriginRef.current = null;
     cropInteractionRef.current = null;
+    if (rafIdRef.current !== null) {
+      cancelAnimationFrame(rafIdRef.current);
+      rafIdRef.current = null;
+    }
   }, [previewUrl, adjustments.crop, isCropping, image]);
 
   useEffect(() => {
@@ -159,9 +169,11 @@ const ImagePreviewCanvas = ({
       return;
     }
 
+    const target = event.target as HTMLElement;
+    target.setPointerCapture?.(event.pointerId);
     dragOriginRef.current = {
-      x: event.clientX - offset.x,
-      y: event.clientY - offset.y
+      x: event.clientX - offsetRef.current.x,
+      y: event.clientY - offsetRef.current.y
     };
   };
 
@@ -170,14 +182,32 @@ const ImagePreviewCanvas = ({
       return;
     }
 
-    setOffset({
-      x: event.clientX - dragOriginRef.current.x,
-      y: event.clientY - dragOriginRef.current.y
-    });
+    const newX = event.clientX - dragOriginRef.current.x;
+    const newY = event.clientY - dragOriginRef.current.y;
+    offsetRef.current = { x: newX, y: newY };
+
+    if (rafIdRef.current === null) {
+      rafIdRef.current = requestAnimationFrame(() => {
+        rafIdRef.current = null;
+        const container = previewContainerRef.current;
+        if (container) {
+          container.style.transform = `translate(${offsetRef.current.x}px, ${offsetRef.current.y}px)`;
+        }
+      });
+    }
   };
 
-  const handlePointerUp = () => {
-    dragOriginRef.current = null;
+  const handlePointerUp = (event: React.PointerEvent<HTMLImageElement>) => {
+    if (dragOriginRef.current) {
+      (event.target as HTMLElement).releasePointerCapture?.(event.pointerId);
+      dragOriginRef.current = null;
+      // Commit final position to React state and clear inline transform
+      const container = previewContainerRef.current;
+      if (container) {
+        container.style.transform = '';
+      }
+      setOffset(offsetRef.current);
+    }
   };
 
   const beginCropMove = (event: React.PointerEvent<HTMLDivElement>) => {
@@ -271,8 +301,9 @@ const ImagePreviewCanvas = ({
         </div>
       ) : previewUrl && displayedRect ? (
         <div
+          ref={previewContainerRef}
           data-testid="preview-stage-content"
-          className="absolute"
+          className="absolute will-change-transform"
           style={{
             left: displayedRect.left,
             top: displayedRect.top,
@@ -285,11 +316,13 @@ const ImagePreviewCanvas = ({
             src={previewUrl}
             alt="preview"
             className="h-full w-full rounded select-none"
-            style={{ cursor: scale > 1 && !isCropping ? 'grab' : 'default' }}
+            style={{
+              cursor: scale > 1 && !isCropping ? 'grab' : 'default',
+              filter: cssFilter || undefined
+            }}
             onPointerDown={handlePointerDown}
             onPointerMove={handlePointerMove}
             onPointerUp={handlePointerUp}
-            onPointerLeave={handlePointerUp}
           />
 
           {overlayCrop ? (

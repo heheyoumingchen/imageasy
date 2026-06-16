@@ -1,10 +1,11 @@
 import { useEffect, useState } from 'react';
-import { AboutCard, CacheCard, GeneralSettingsCard, TaskSettingsCard } from '../components/settings';
+import { AboutCard, GeneralSettingsCard, TaskSettingsCard } from '../components/settings';
 import type { TaskOutputFormat, TaskSettingsCardCopy, TaskSettingsValue } from '../components/settings';
 import ConfirmDialog from '../components/feedback/ConfirmDialog';
 import { getSettingsStore } from '../hooks/useSettingsStore';
 import { clearAppCache, getAppCacheUsage } from '../services/cacheCommands';
 import type { CacheUsageResult } from '../types/cache';
+import { chooseOutputDirectory } from '../services/fileDialog';
 import type { PersistedSettings } from '../stores/settingsStore';
 
 const buildFormState = (draft: PersistedSettings | null, settings: PersistedSettings): PersistedSettings => draft ?? settings;
@@ -61,11 +62,9 @@ const SettingsPage = () => {
     language: state.language,
     maxConcurrency: state.maxConcurrency,
     outputDirectoryStrategy: state.outputDirectoryStrategy,
+    defaultOutputDirectory: state.defaultOutputDirectory,
     rememberLastParams: state.rememberLastParams,
-    conversion: state.conversion,
-    extraction: state.extraction,
-    splitting: state.splitting,
-    stitching: state.stitching
+    exportSettings: state.exportSettings
   });
   const isDirty = hasSettingsDraftChanged(draft, savedSnapshot);
   const isEnglish = formState.language === 'en-US';
@@ -82,7 +81,9 @@ const SettingsPage = () => {
         maxConcurrency: 'Max Concurrent Tasks',
         outputDirectoryStrategy: 'Default Output Strategy',
         sameAsSource: 'Same as source folder',
-        custom: 'Manual selection',
+        custom: 'Fixed default folder',
+        chooseDefaultOutputDirectory: 'Choose output folder',
+        defaultOutputDirectoryPlaceholder: 'No default output folder selected',
         editor: 'Editing Preferences',
         rememberLastParams: 'Retain parameters on switch',
         aboutApp: 'About',
@@ -96,10 +97,7 @@ const SettingsPage = () => {
         checkForUpdates: 'Check for Updates',
         contact: 'Contact',
         close: 'Close',
-        conversionTask: 'Image Conversion',
-        extractionTask: 'Image Extraction',
-        splittingTask: 'Image Splitting',
-        stitchingTask: 'Image Stitching',
+        exportSettings: 'Common Export Settings',
         namingPattern: 'Naming pattern',
         sourceNameIndex: 'Source name - index',
         sourceNameDate: 'Source name - date',
@@ -119,7 +117,9 @@ const SettingsPage = () => {
         maxConcurrency: '最大并发任务数',
         outputDirectoryStrategy: '默认输出目录策略',
         sameAsSource: '与源文件同目录',
-        custom: '每次手动选择',
+        custom: '固定默认输出目录',
+        chooseDefaultOutputDirectory: '选择输出目录',
+        defaultOutputDirectoryPlaceholder: '未选择默认输出目录',
         editor: '图片编辑偏好',
         rememberLastParams: '切换图片时保留调整参数',
         aboutApp: '关于软件',
@@ -133,10 +133,7 @@ const SettingsPage = () => {
         checkForUpdates: '检查新版本（Check for Updates）',
         contact: '联系方式',
         close: '关闭',
-        conversionTask: '格式转换',
-        extractionTask: '图片提取',
-        splittingTask: '图片分割',
-        stitchingTask: '图片拼接',
+        exportSettings: '公共导出设置',
         namingPattern: '命名规则',
         sourceNameIndex: '原文件名-序号',
         sourceNameDate: '原文件名-日期-序号',
@@ -195,76 +192,63 @@ const SettingsPage = () => {
 
   const cacheSizeText = formatCacheBytes(cacheUsage?.totalBytes ?? 0);
 
-  const taskCardCopy = (title: string): TaskSettingsCardCopy => ({
-    title,
+  const taskCardCopy = (): TaskSettingsCardCopy => ({
+    title: copy.exportSettings,
     namingPattern: copy.namingPattern,
     sourceNameIndex: copy.sourceNameIndex,
     sourceNameDate: copy.sourceNameDate,
     outputFormat: copy.outputFormat,
     colorMode: copy.colorMode,
     grayCmyk: copy.grayCmyk,
-    outputQuality: copy.outputQuality
+    outputDirectoryStrategy: copy.outputDirectoryStrategy,
+    sameAsSource: copy.sameAsSource,
+    custom: copy.custom,
+    chooseDefaultOutputDirectory: copy.chooseDefaultOutputDirectory,
+    defaultOutputDirectoryPlaceholder: copy.defaultOutputDirectoryPlaceholder
   });
 
-  const updateTaskDraft = <K extends 'conversion' | 'extraction' | 'splitting' | 'stitching'>(
-    key: K,
-    partial: Partial<PersistedSettings[K]>
-  ) => {
-    updateDraft({ [key]: { ...formState[key], ...partial } } as Partial<PersistedSettings>);
+  const updateExportSettings = (partial: Partial<typeof formState.exportSettings>) => {
+    updateDraft({ exportSettings: { ...formState.exportSettings, ...partial } });
+  };
+
+  const chooseDefaultOutputDirectory = async () => {
+    const selected = await chooseOutputDirectory(formState.defaultOutputDirectory || undefined);
+    if (selected) {
+      updateDraft({ defaultOutputDirectory: selected });
+    }
   };
 
   return (
     <div data-testid="settings-page-shell" className="flex flex-col h-full p-5 overflow-hidden bg-bg-main">
-      <div className="flex-1 space-y-5 min-h-0 overflow-y-auto pr-2 custom-scrollbar">
-        <AboutCard copy={copy} onOpenContact={() => setIsContactDialogOpen(true)} />
-        <GeneralSettingsCard
-          copy={copy}
-          formState={formState}
-          isLoading={state.isLoading}
-          onThemeChange={(theme) => updateDraft({ theme })}
-          onLanguageChange={(language) => updateDraft({ language })}
-          onMaxConcurrencyChange={(maxConcurrency) => updateDraft({ maxConcurrency })}
-          onOutputDirectoryStrategyChange={(outputDirectoryStrategy) => updateDraft({ outputDirectoryStrategy })}
-          rememberLastParams={formState.rememberLastParams}
-          onToggleRemember={() => updateDraft({ rememberLastParams: !formState.rememberLastParams })}
-        />
-        <TaskSettingsCard
-          copy={taskCardCopy(copy.conversionTask)}
-          value={formState.conversion}
-          formatOptions={['jpg', 'png', 'webp'] as TaskOutputFormat[]}
-          showColorMode
-          showQuality
-          disabled={state.isLoading}
-          onChange={(partial) => updateTaskDraft('conversion', partial)}
-        />
-        <TaskSettingsCard
-          copy={taskCardCopy(copy.extractionTask)}
-          value={formState.extraction}
-          formatOptions={['jpg', 'png'] as TaskOutputFormat[]}
-          showColorMode
-          showQuality={false}
-          disabled={state.isLoading}
-          onChange={(partial) => updateTaskDraft('extraction', partial as Partial<typeof formState.extraction>)}
-        />
-        <TaskSettingsCard
-          copy={taskCardCopy(copy.splittingTask)}
-          value={formState.splitting}
-          formatOptions={['jpg', 'png', 'webp'] as TaskOutputFormat[]}
-          showColorMode={false}
-          showQuality
-          disabled={state.isLoading}
-          onChange={(partial) => updateTaskDraft('splitting', partial)}
-        />
-        <TaskSettingsCard
-          copy={taskCardCopy(copy.stitchingTask)}
-          value={formState.stitching}
-          formatOptions={['jpg', 'png', 'webp'] as TaskOutputFormat[]}
-          showColorMode={false}
-          showQuality
-          disabled={state.isLoading}
-          onChange={(partial) => updateTaskDraft('stitching', partial)}
-        />
-        <CacheCard copy={copy} cacheSizeText={cacheSizeText} isLoading={isClearingCache} onClear={handleClearCache} />
+      <div className="flex-1 min-h-0 overflow-y-auto pr-2 custom-scrollbar">
+        {/* 关于软件 / 界面与任务设置 / 公共导出设置 共用一个底纹，中间用细线分隔 */}
+        <div className="bg-white rounded border border-border-light divide-y divide-border-light/70">
+          <AboutCard copy={copy} onOpenContact={() => setIsContactDialogOpen(true)} />
+          <GeneralSettingsCard
+            copy={copy}
+            formState={formState}
+            isLoading={state.isLoading}
+            cacheSizeText={cacheSizeText}
+            isClearingCache={isClearingCache}
+            onThemeChange={(theme) => updateDraft({ theme })}
+            onLanguageChange={(language) => updateDraft({ language })}
+            onMaxConcurrencyChange={(maxConcurrency) => updateDraft({ maxConcurrency })}
+            onOutputQualityChange={(quality) => updateExportSettings({ quality })}
+            onClearCache={handleClearCache}
+          />
+          <TaskSettingsCard
+            copy={taskCardCopy()}
+            value={formState.exportSettings}
+            formatOptions={['jpg', 'png', 'webp'] as TaskOutputFormat[]}
+            showColorMode
+            outputDirectoryStrategy={formState.outputDirectoryStrategy}
+            defaultOutputDirectory={formState.defaultOutputDirectory}
+            disabled={state.isLoading}
+            onChange={updateExportSettings}
+            onOutputDirectoryStrategyChange={(outputDirectoryStrategy) => updateDraft({ outputDirectoryStrategy })}
+            onChooseDefaultOutputDirectory={chooseDefaultOutputDirectory}
+          />
+        </div>
       </div>
 
       <div data-testid="settings-actions-footer" className="mt-6 flex justify-end gap-4 border-t border-border-light/60 pt-6">
