@@ -114,13 +114,8 @@ describe('ImageEditorPage redesign layout', () => {
     await waitFor(() => {
       expect(openImageSession).toHaveBeenCalledTimes(1);
     });
-    expect(generateImagePreview).toHaveBeenCalledTimes(1);
-    expect(generateImagePreview).toHaveBeenCalledWith({
-      path: 'F:/Demo/示例图片_A.jpg',
-      adjustments: expect.objectContaining({ brightness: 0, filterType: 'none' }),
-      maxWidth: 760,
-      maxHeight: 560
-    });
+    // 原图直显方案：不再调用 generateImagePreview，直接用 convertFileSrc 加载
+    expect(generateImagePreview).not.toHaveBeenCalled();
   });
 
   it('renders a streamlined filmstrip and status bar after opening an image', async () => {
@@ -457,13 +452,10 @@ describe('ImageEditorPage redesign layout', () => {
     await user.click(screen.getByRole('button', { name: '打开' }));
 
     await waitFor(() => {
-      expect(generateImagePreview).toHaveBeenCalledWith(
-        expect.objectContaining({
-          maxWidth: 760,
-          maxHeight: 560
-        })
-      );
+      expect(openImageSession).toHaveBeenCalledTimes(1);
     });
+    // 原图直显方案：不再调用 generateImagePreview
+    expect(generateImagePreview).not.toHaveBeenCalled();
 
     await user.click(screen.getByRole('button', { name: '裁剪' }));
 

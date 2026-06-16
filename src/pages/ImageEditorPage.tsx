@@ -1,15 +1,16 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { convertFileSrc } from '@tauri-apps/api/core';
 import EditorBottomStatusBar from '../components/image-editor/EditorBottomStatusBar';
 import EditorFilmstrip from '../components/image-editor/EditorFilmstrip';
 import EditorInspector from '../components/image-editor/EditorInspector';
 import EditorPreviewStage from '../components/image-editor/EditorPreviewStage';
 import EditorTopActionBar from '../components/image-editor/EditorTopActionBar';
 import UnsavedChangeDialog from '../components/image-editor/UnsavedChangeDialog';
-import { commitCropToWorkingImage, generateImagePreview, openImageSession, prefetchImagePreview, saveImageAsJpg } from '../services/editorCommands';
+import { commitCropToWorkingImage, openImageSession, saveImageAsJpg } from '../services/editorCommands';
 import { chooseJpgSavePath, openImageFile } from '../services/fileDialog';
 import { useLanguage } from '../hooks/useLanguage';
 import { toDisplayErrorMessage } from '../utils/errors';
-import { computeCssFilterDelta } from '../utils/cssFilterApprox';
+import { adjustmentsToCssFilter, adjustmentsToTransform } from '../utils/cssFilterApprox';
 import { useEditorStore } from '../stores/editorStore';
 import type { AdjustmentKey, AdjustmentParams } from '../types/editor';
 
@@ -75,20 +76,22 @@ const ImageEditorPage = () => {
   const [isZoomSliderOpen, setIsZoomSliderOpen] = useState(false);
   const [isCropping, setIsCropping] = useState(false);
 
-  const latestPreviewRequestId = useRef(0);
   const latestCropRequestId = useRef(0);
-  const previousPreviewPathRef = useRef<string | null>(null);
-  const renderedAdjustmentsRef = useRef<AdjustmentParams | null>(null);
   const language = useLanguage();
   const isEnglish = language === 'en-US';
 
-  // CSS filter 即时预览：当前 previewUrl 对应的已渲染参数与目标参数之间的差值
-  const cssFilter = useMemo(() => {
-    if (!renderedAdjustmentsRef.current || !previewUrl) {
-      return undefined;
+  // 原图直显：切换图片时直接用 convertFileSrc 加载原图
+  useEffect(() => {
+    if (!currentImage) {
+      setPreviewUrl(null);
+      return;
     }
-    return computeCssFilterDelta(renderedAdjustmentsRef.current, adjustments);
-  }, [adjustments, previewUrl]);
+    setPreviewUrl(convertFileSrc(currentImage.path));
+  }, [currentImage]);
+
+  // CSS filter 实时预览：所有调整参数即时转为 CSS filter，零延迟
+  const cssFilter = useMemo(() => adjustmentsToCssFilter(adjustments), [adjustments]);
+  const cssTransform = useMemo(() => adjustmentsToTransform(adjustments.rotation), [adjustments.rotation]);
 
   const copy = useMemo(
     () =>
@@ -115,81 +118,6 @@ const ImageEditorPage = () => {
           },
     [isEnglish]
   );
-
-  useEffect(() => {
-    if (!currentImage) {
-      previousPreviewPathRef.current = null;
-      setPreviewUrl(null);
-      return;
-    }
-
-    const isImageSwitch = previousPreviewPathRef.current !== currentImage.path;
-    previousPreviewPathRef.current = currentImage.path;
-
-    const requestId = latestPreviewRequestId.current + 1;
-    latestPreviewRequestId.current = requestId;
-
-    let cancelled = false;
-    const loadPreview = async () => {
-      setIsPreviewLoading(true);
-      setPageError(null);
-
-      try {
-        const result = await generateImagePreview({
-          path: currentImage.path,
-          adjustments,
-          maxWidth: 760,
-          maxHeight: 560
-        });
-
-        if (!cancelled && requestId === latestPreviewRequestId.current) {
-          renderedAdjustmentsRef.current = adjustments;
-          setPreviewUrl(result.previewUrl);
-        }
-      } catch (error) {
-        if (!cancelled && requestId === latestPreviewRequestId.current) {
-          setPageError(toDisplayErrorMessage(error, copy.previewFailed));
-        }
-      } finally {
-        if (!cancelled && requestId === latestPreviewRequestId.current) {
-          setIsPreviewLoading(false);
-        }
-      }
-    };
-
-    if (isImageSwitch) {
-      void loadPreview();
-      return () => {
-        cancelled = true;
-      };
-    }
-
-    const timerId = window.setTimeout(() => {
-      void loadPreview();
-    }, 120);
-
-    return () => {
-      cancelled = true;
-      window.clearTimeout(timerId);
-    };
-  }, [currentImage, adjustments, copy.previewFailed]);
-
-  useEffect(() => {
-    if (!currentImage || currentIndex < 0 || directoryImages.length === 0) {
-      return;
-    }
-
-    const timerId = window.setTimeout(() => {
-      const adjacentImages = [directoryImages[currentIndex - 1], directoryImages[currentIndex + 1]].filter(Boolean);
-      for (const image of adjacentImages) {
-        void prefetchImagePreview({ path: image.path, maxWidth: 760, maxHeight: 560 }).catch(() => undefined);
-      }
-    }, 200);
-
-    return () => {
-      window.clearTimeout(timerId);
-    };
-  }, [currentImage, currentIndex, directoryImages]);
 
   const handleOpenImage = async () => {
     setIsOpening(true);
@@ -367,6 +295,7 @@ const ImageEditorPage = () => {
               isCropCommitting={isCropCommitting}
               error={pageError}
               cssFilter={cssFilter}
+              cssTransform={cssTransform}
               onApplyCrop={handleApplyCrop}
               externalIsCropping={isCropping}
               onExternalIsCroppingChange={setIsCropping}

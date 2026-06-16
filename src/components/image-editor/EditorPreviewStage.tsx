@@ -11,6 +11,7 @@ type EditorPreviewStageProps = {
   isEnglish?: boolean;
   error: string | null;
   cssFilter?: string;
+  cssTransform?: string;
   onApplyCrop: (crop: CropRect | null) => void | Promise<void>;
   externalIsCropping?: boolean;
   onExternalIsCroppingChange?: (value: boolean) => void;
@@ -29,6 +30,7 @@ const EditorPreviewStage = ({
   isEnglish = false,
   error,
   cssFilter,
+  cssTransform,
   onApplyCrop,
   externalIsCropping,
   onExternalIsCroppingChange,
@@ -106,6 +108,7 @@ const EditorPreviewStage = ({
             scale={zoomValue}
             isCropping={isCropping}
             cssFilter={cssFilter}
+            cssTransform={cssTransform}
             onCroppingChange={setIsCropping}
             onApplyCrop={onApplyCrop}
           />

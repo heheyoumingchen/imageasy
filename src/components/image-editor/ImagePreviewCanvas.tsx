@@ -13,6 +13,7 @@ type ImagePreviewCanvasProps = {
   scale: number;
   isCropping: boolean;
   cssFilter?: string;
+  cssTransform?: string;
   onCroppingChange: (value: boolean) => void;
   onApplyCrop: (crop: CropRect | null) => void | Promise<void>;
 };
@@ -77,6 +78,7 @@ const ImagePreviewCanvas = ({
   scale,
   isCropping,
   cssFilter,
+  cssTransform,
   onCroppingChange,
   onApplyCrop
 }: ImagePreviewCanvasProps) => {
@@ -318,7 +320,8 @@ const ImagePreviewCanvas = ({
             className="h-full w-full rounded select-none"
             style={{
               cursor: scale > 1 && !isCropping ? 'grab' : 'default',
-              filter: cssFilter || undefined
+              filter: cssFilter || undefined,
+              transform: cssTransform || undefined
             }}
             onPointerDown={handlePointerDown}
             onPointerMove={handlePointerMove}
