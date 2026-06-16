@@ -3,12 +3,13 @@ use anyhow::{Context, Result};
 use base64::{engine::general_purpose::STANDARD, Engine as _};
 use image::codecs::jpeg::JpegEncoder;
 use image::imageops::{self, FilterType};
-use image::{DynamicImage, ImageBuffer, Rgba};
+use image::{DynamicImage, ImageBuffer, Rgb, Rgba};
+use jpeg_decoder::Decoder as JpegDecoder;
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::{
     fs,
-    io::Cursor,
+    io::{BufReader, Cursor},
     path::{Path, PathBuf},
 };
 use walkdir::WalkDir;
@@ -55,10 +56,121 @@ pub struct StitchLayoutCell {
     pub offset_y: f32,
 }
 
+/// 拼接缩略图缓存目录
+fn stitching_thumbnail_cache_dir() -> PathBuf {
+    if let Some(cache) = crate::portable::portable_cache_dir() {
+        cache.join("stitching-thumbnails")
+    } else {
+        std::env::temp_dir()
+            .join("imageasy")
+            .join("stitching-thumbnails")
+    }
+}
+
+/// 简单哈希函数（FNV-1a）
+fn simple_hash(input: &str) -> u64 {
+    let mut hash: u64 = 0xcbf29ce484222325;
+    for byte in input.bytes() {
+        hash ^= byte as u64;
+        hash = hash.wrapping_mul(0x100000001b3);
+    }
+    hash
+}
+
+/// 生成缩略图缓存文件名（基于源文件路径 + mtime + size）
+fn stitching_thumbnail_cache_key(path: &Path) -> Option<String> {
+    let metadata = fs::metadata(path).ok()?;
+    let mtime = metadata.modified().ok()?.duration_since(std::time::UNIX_EPOCH).ok()?.as_secs();
+    let size = metadata.len();
+    let path_str = path.to_string_lossy();
+    let hash = simple_hash(&format!("{path_str}_{mtime}_{size}"));
+    let stem = path.file_stem()?.to_str()?;
+    Some(format!("{stem}_{hash}_360.jpg"))
+}
+
+/// JPEG 缩略图快速解码：利用 DCT 缩放因子直接产出小图
+fn fast_decode_jpeg_thumbnail_stitching(path: &Path, size: u32) -> Result<DynamicImage> {
+    let file = fs::File::open(path)
+        .with_context(|| format!("无法打开 JPEG: {}", path.display()))?;
+    let mut decoder = JpegDecoder::new(BufReader::new(file));
+
+    decoder.read_info()
+        .with_context(|| format!("无法读取 JPEG 头部: {}", path.display()))?;
+
+    let scale = size.min(u16::MAX as u32) as u16;
+    decoder.scale(scale, scale)
+        .with_context(|| format!("无法设置 JPEG 缩放: {}", path.display()))?;
+
+    let pixels = decoder.decode()
+        .with_context(|| format!("JPEG 解码失败: {}", path.display()))?;
+
+    let info = decoder.info().context("解码后信息不可用")?;
+    let (w, h) = (info.width as u32, info.height as u32);
+
+    let dynamic_image = match info.pixel_format {
+        jpeg_decoder::PixelFormat::RGB24 => {
+            let buffer = ImageBuffer::<Rgb<u8>, _>::from_raw(w, h, pixels)
+                .context("无法构建 RGB 图像缓冲")?;
+            DynamicImage::ImageRgb8(buffer)
+        }
+        jpeg_decoder::PixelFormat::L8 => {
+            let buffer = image::ImageBuffer::<image::Luma<u8>, _>::from_raw(w, h, pixels)
+                .context("无法构建灰度图像缓冲")?;
+            DynamicImage::ImageLuma8(buffer)
+        }
+        _ => {
+            let image = image::open(path)
+                .with_context(|| format!("无法打开图片: {}", path.display()))?;
+            image.resize(size, size, FilterType::CatmullRom)
+        }
+    };
+
+    if w > size || h > size {
+        Ok(dynamic_image.resize(size, size, FilterType::CatmullRom))
+    } else {
+        Ok(dynamic_image)
+    }
+}
+
 fn create_stitching_thumbnail_data_url(path: &Path) -> Result<String> {
-    let image = image::open(path)
-        .with_context(|| format!("无法生成拼接缩略图: {}", path.display()))?;
-    let thumbnail = image.resize(360, 360, FilterType::CatmullRom);
+    let cache_dir = stitching_thumbnail_cache_dir();
+
+    // 检查磁盘缓存
+    if let Some(cache_name) = stitching_thumbnail_cache_key(path) {
+        let cached_path = cache_dir.join(&cache_name);
+        if cached_path.exists() {
+            // 返回缓存文件的绝对路径（前端通过 convertFileSrc 转为 asset URL）
+            return Ok(cached_path.to_string_lossy().into_owned());
+        }
+    }
+
+    // JPEG 使用快速解码，非 JPEG 使用完整解码
+    let extension = path.extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("")
+        .to_ascii_lowercase();
+
+    let thumbnail = if matches!(extension.as_str(), "jpg" | "jpeg") {
+        fast_decode_jpeg_thumbnail_stitching(path, 360)?
+    } else {
+        let image = image::open(path)
+            .with_context(|| format!("无法生成拼接缩略图: {}", path.display()))?;
+        image.resize(360, 360, FilterType::CatmullRom)
+    };
+
+    // 写入磁盘缓存
+    if let Some(cache_name) = stitching_thumbnail_cache_key(path) {
+        let _ = fs::create_dir_all(&cache_dir);
+        let cached_path = cache_dir.join(&cache_name);
+        let file = fs::File::create(&cached_path)
+            .with_context(|| format!("无法创建缩略图缓存: {}", cached_path.display()))?;
+        let mut writer = std::io::BufWriter::new(file);
+        let mut encoder = JpegEncoder::new_with_quality(&mut writer, 58);
+        encoder.encode_image(&thumbnail)?;
+        return Ok(cached_path.to_string_lossy().into_owned());
+    }
+
+    // 降级：无法生成缓存 key 时返回 base64
     let mut buffer = Cursor::new(Vec::new());
     let mut encoder = JpegEncoder::new_with_quality(&mut buffer, 58);
     encoder.encode_image(&thumbnail)?;
@@ -277,8 +389,8 @@ fn inside_rounded_rect(x: u32, y: u32, width: u32, height: u32, radius: u32) -> 
     }
 }
 
-// 在 cover（等比铺满、裁剪超出）基础上应用缩放与自由位移。
-// 默认 scale=1 时图片等比铺满方格（短边贴合，长边裁剪），与前端 object-cover 一致。
+// 在 contain（完整适配、留白）基础上应用缩放与自由位移。
+// 默认 scale=1 时图片完整适配方格（长边贴合，短边留白），不裁切内容。
 // scale>1 进一步放大；offset_x/offset_y 以方格尺寸的比例平移调整可视区域。
 fn object_contain_transform(
     image: &DynamicImage,
@@ -292,15 +404,15 @@ fn object_contain_transform(
     let offset_x = offset_x.clamp(-1.0, 1.0);
     let offset_y = offset_y.clamp(-1.0, 1.0);
 
-    // cover: 使用 max 使短边贴合，长边超出后裁剪
-    let cover_scale = (target_width as f32 / image.width() as f32)
-        .max(target_height as f32 / image.height() as f32)
+    // contain: 使用 min 使长边贴合，短边留白
+    let contain_scale = (target_width as f32 / image.width() as f32)
+        .min(target_height as f32 / image.height() as f32)
         * scale;
-    let resize_width = ((image.width() as f32 * cover_scale).round() as u32).max(1);
-    let resize_height = ((image.height() as f32 * cover_scale).round() as u32).max(1);
+    let resize_width = ((image.width() as f32 * contain_scale).round() as u32).max(1);
+    let resize_height = ((image.height() as f32 * contain_scale).round() as u32).max(1);
     let resized = image.resize_exact(resize_width, resize_height, FilterType::Lanczos3);
 
-    // 透明底图，居中放置后按 offset 比例平移；越界部分由 overlay 自动裁剪。
+    // 透明底图,居中放置后按 offset 比例平移；越界部分由 overlay 自动裁剪。
     let mut tile = ImageBuffer::from_pixel(target_width, target_height, Rgba([0, 0, 0, 0]));
     let center_x = (target_width as f32 - resize_width as f32) / 2.0;
     let center_y = (target_height as f32 - resize_height as f32) / 2.0;
