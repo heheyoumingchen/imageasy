@@ -207,7 +207,7 @@ const LayoutCanvas = ({
                         src={image.preview}
                         alt={image.name}
                         draggable={false}
-                        className="w-full h-full object-cover transition-transform duration-75 select-none"
+                        className="w-full h-full object-contain transition-transform duration-75 select-none"
                         style={{ transform: previewTransform(image) }}
                       />
                     ) : (

@@ -389,8 +389,9 @@ fn inside_rounded_rect(x: u32, y: u32, width: u32, height: u32, radius: u32) -> 
     }
 }
 
-// 在 cover（中心铺满、裁剪超出）基础上应用缩放与自由位移。
-// 默认 scale=1 时图片以中心等比缩放铺满方格（短边贴合，长边裁剪）。
+// 在 contain（等比适配、留白不裁切）基础上应用缩放与自由位移。
+// 默认 scale=1 时图片等比缩放使长边贴合方格，短边留白，完整显示不裁切。
+// 示例：原图 50x150，方格 25x25 → 缩放为 8.33x25（长边 150 缩到 25，宽度等比为 8.33）
 // scale>1 进一步放大；offset_x/offset_y 以方格尺寸的比例平移调整可视区域。
 fn object_contain_transform(
     image: &DynamicImage,
@@ -404,12 +405,12 @@ fn object_contain_transform(
     let offset_x = offset_x.clamp(-1.0, 1.0);
     let offset_y = offset_y.clamp(-1.0, 1.0);
 
-    // cover: 使用 max 使短边贴合，长边超出后裁剪
-    let cover_scale = (target_width as f32 / image.width() as f32)
-        .max(target_height as f32 / image.height() as f32)
+    // contain: 使用 min 使长边贴合，短边留白
+    let contain_scale = (target_width as f32 / image.width() as f32)
+        .min(target_height as f32 / image.height() as f32)
         * scale;
-    let resize_width = ((image.width() as f32 * cover_scale).round() as u32).max(1);
-    let resize_height = ((image.height() as f32 * cover_scale).round() as u32).max(1);
+    let resize_width = ((image.width() as f32 * contain_scale).round() as u32).max(1);
+    let resize_height = ((image.height() as f32 * contain_scale).round() as u32).max(1);
     let resized = image.resize_exact(resize_width, resize_height, FilterType::Lanczos3);
 
     let mut tile = ImageBuffer::from_pixel(target_width, target_height, Rgba([0, 0, 0, 0]));
