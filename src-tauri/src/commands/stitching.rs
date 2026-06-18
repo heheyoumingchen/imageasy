@@ -47,7 +47,7 @@ pub struct StitchLayoutCell {
     pub col: u32,
     pub row_span: u32,
     pub col_span: u32,
-    // 方格内图片的缩放与位移（编辑模式）。scale>=1，offset 以方格尺寸的比例表示（-0.5~0.5）。
+    // 方格内图片的缩放与位移（编辑模式）。scale>=1，offset 以方格尺寸的比例表示（-1~1）。
     #[serde(default = "default_scale")]
     pub scale: f32,
     #[serde(default)]
@@ -389,11 +389,11 @@ fn inside_rounded_rect(x: u32, y: u32, width: u32, height: u32, radius: u32) -> 
     }
 }
 
-// 在 contain（等比适配、留白不裁切）基础上应用缩放与自由位移。
-// 默认 scale=1 时图片等比缩放使长边贴合方格，短边留白，完整显示不裁切。
-// 示例：原图 50x150，方格 25x25 → 缩放为 8.33x25（长边 150 缩到 25，宽度等比为 8.33）
+// 在 cover（等比铺满、超出不显示）基础上应用缩放与自由位移。
+// 默认 scale=1 时图片等比缩放使短边贴合方格，长边超出方格并被 tile 边界隐藏。
+// 示例：原图 50x150，方格 25x25 → 缩放为 25x75（宽度贴合，高度上下超出并隐藏）。
 // scale>1 进一步放大；offset_x/offset_y 以方格尺寸的比例平移调整可视区域。
-fn object_contain_transform(
+fn object_cover_transform(
     image: &DynamicImage,
     target_width: u32,
     target_height: u32,
@@ -405,12 +405,12 @@ fn object_contain_transform(
     let offset_x = offset_x.clamp(-1.0, 1.0);
     let offset_y = offset_y.clamp(-1.0, 1.0);
 
-    // contain: 使用 min 使长边贴合，短边留白
-    let contain_scale = (target_width as f32 / image.width() as f32)
-        .min(target_height as f32 / image.height() as f32)
+    // cover: 使用 max 使短边贴合，长边超出后由 tile 边界隐藏
+    let cover_scale = (target_width as f32 / image.width() as f32)
+        .max(target_height as f32 / image.height() as f32)
         * scale;
-    let resize_width = ((image.width() as f32 * contain_scale).round() as u32).max(1);
-    let resize_height = ((image.height() as f32 * contain_scale).round() as u32).max(1);
+    let resize_width = ((image.width() as f32 * cover_scale).round() as u32).max(1);
+    let resize_height = ((image.height() as f32 * cover_scale).round() as u32).max(1);
     let resized = image.resize_exact(resize_width, resize_height, FilterType::Lanczos3);
 
     let mut tile = ImageBuffer::from_pixel(target_width, target_height, Rgba([0, 0, 0, 0]));
@@ -506,7 +506,7 @@ fn stitch_image_files_impl(request: StitchImageFilesRequest) -> Result<StitchIma
             first_source = Some(source.clone());
         }
         let image = image::open(&source).with_context(|| format!("无法打开图片: {}", source_name(&source, &cell.source_path)))?;
-        let placed = object_contain_transform(&image, rect.width, rect.height, cell.scale, cell.offset_x, cell.offset_y);
+        let placed = object_cover_transform(&image, rect.width, rect.height, cell.scale, cell.offset_x, cell.offset_y);
         overlay_rounded(&mut canvas, &placed, rect, request.border_radius);
         stitched_count += 1;
     }

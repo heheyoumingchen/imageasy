@@ -52,7 +52,7 @@ fn inspect_stitching_directory_collects_images_only() {
 }
 
 #[test]
-fn stitch_image_files_outputs_layout_canvas_with_object_contain_fit() {
+fn stitch_image_files_outputs_layout_canvas_with_object_cover_fit() {
     let dir = tempdir().unwrap();
     let a = dir.path().join("a.png");
     let b = dir.path().join("b.png");
@@ -83,8 +83,14 @@ fn stitch_image_files_outputs_layout_canvas_with_object_contain_fit() {
     assert!(result.output_path.ends_with("a-stitch-001.png"));
     let output = image::open(PathBuf::from(&result.output_path)).unwrap().to_rgba8();
     assert_eq!(output.dimensions(), (768, 768));
-    assert_eq!(output.get_pixel(100, 384).0, [255, 0, 0, 255]);
-    assert_eq!(output.get_pixel(668, 384).0, [0, 0, 255, 255]);
+
+    // Each 384x768 cell must be fully covered by its source color. Under contain,
+    // these edge pixels would remain the white background because the source aspect
+    // ratio does not match the cell aspect ratio.
+    assert_eq!(output.get_pixel(0, 0).0, [255, 0, 0, 255]);
+    assert_eq!(output.get_pixel(383, 767).0, [255, 0, 0, 255]);
+    assert_eq!(output.get_pixel(384, 0).0, [0, 0, 255, 255]);
+    assert_eq!(output.get_pixel(767, 767).0, [0, 0, 255, 255]);
 }
 
 #[test]
@@ -262,7 +268,7 @@ fn stitch_image_files_preserves_background_around_rounded_cell_corners() {
     }).unwrap();
 
     let output = image::open(PathBuf::from(&result.output_path)).unwrap().to_rgba8();
-    // 圆角处仍露出背景色；图片在 contain 适配下居中放置，取方格中心验证图像像素。
+    // 圆角处仍露出背景色；图片在 cover 适配下居中铺满，取方格中心验证图像像素。
     assert_eq!(output.get_pixel(20, 20).0, [255, 255, 255, 255]);
     assert_eq!(output.get_pixel(202, 384).0, [255, 0, 0, 255]);
 }
