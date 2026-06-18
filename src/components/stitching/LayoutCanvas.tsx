@@ -31,8 +31,8 @@ const SCALE_STEP = 0.2;
 const SCALE_MIN = 1;
 const SCALE_MAX = 6;
 
-// 编辑模式下的预览：图片以 contain 适配方格（留白露出背景），
-// offset 以方格尺寸的比例平移（translate% 相对元素自身尺寸，与后端 offset*target 一致），scale 居中缩放。
+// 编辑模式下的预览：图片以 cover 适配方格（等比铺满，超出部分由方格 overflow-hidden 隐藏），
+// offset 以方格尺寸的比例平移（translate% 相对元素自身尺寸，与后端 offset*target 一致），scale 在 cover 基础上继续缩放。
 const previewTransform = (image: StitchingCanvasImage) =>
   `translate(${image.offsetX * 100}%, ${image.offsetY * 100}%) scale(${image.scale})`;
 
@@ -207,7 +207,7 @@ const LayoutCanvas = ({
                         src={image.preview}
                         alt={image.name}
                         draggable={false}
-                        className="w-full h-full object-contain transition-transform duration-75 select-none"
+                        className="w-full h-full object-cover transition-transform duration-75 select-none"
                         style={{ transform: previewTransform(image) }}
                       />
                     ) : (

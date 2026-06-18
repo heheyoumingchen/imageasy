@@ -93,6 +93,27 @@ describe('StitchImagePage', () => {
     expect(convertFileSrc).not.toHaveBeenCalled();
   });
 
+  it('previews imported stitching images with cover fit inside each cell', async () => {
+    vi.mocked(fileDialog.openStitchingSources).mockResolvedValue({
+      files: ['/test/tall.jpg'], directories: [], cancelled: false,
+    });
+    vi.mocked(stitchingCommands.inspectStitchingFile).mockResolvedValue(
+      createMockInspection({
+        sourcePath: '/test/tall.jpg',
+        sourceName: 'tall.jpg',
+        imageMetadata: { width: 400, height: 1200, extension: 'jpg' },
+        thumbnail: 'data:image/jpeg;base64,tall-thumb',
+      })
+    );
+
+    render(<StitchImagePage />);
+    await user.click(screen.getByRole('button', { name: '添加图片' }));
+
+    const preview = await screen.findByAltText('tall.jpg');
+    expect(preview).toHaveClass('object-cover');
+    expect(preview).not.toHaveClass('object-contain');
+  });
+
   it('shows imported images progressively instead of waiting for every inspection to finish', async () => {
     let resolveA!: (value: InspectStitchingFileResult) => void;
     let resolveB!: (value: InspectStitchingFileResult) => void;
