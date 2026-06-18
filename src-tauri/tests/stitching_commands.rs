@@ -31,7 +31,9 @@ fn inspect_stitching_file_reads_image_metadata() {
     assert_eq!(result.kind, "image");
     assert_eq!(result.source_name, "demo.webp");
     assert_eq!(result.image_metadata.unwrap().height, 6);
-    assert!(result.thumbnail.as_deref().unwrap_or_default().starts_with("data:image/jpeg;base64,"));
+    let thumbnail = result.thumbnail.as_deref().unwrap_or_default();
+    assert!(!thumbnail.is_empty());
+    assert!(thumbnail.ends_with(".jpg") || thumbnail.starts_with("data:image/jpeg;base64,"));
 }
 
 #[test]

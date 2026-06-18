@@ -73,12 +73,12 @@ describe('StitchImagePage', () => {
     ]);
     render(<StitchImagePage />);
     await user.click(screen.getByRole('button', { name: '添加图片' }));
-    expect(await screen.findByAltText('a.jpg')).toHaveAttribute('src', 'data:image/jpeg;base64,/test/a.jpg');
-    expect(screen.getByAltText('b.png')).toHaveAttribute('src', 'data:image/jpeg;base64,/test/b.png');
-    expect(screen.getByAltText('c.webp')).toHaveAttribute('src', 'data:image/jpeg;base64,/test/folder/c.webp');
+    expect(await screen.findByAltText('a.jpg')).toHaveAttribute('src', 'asset:///test/a.jpg');
+    expect(screen.getByAltText('b.png')).toHaveAttribute('src', 'asset:///test/b.png');
+    expect(screen.getByAltText('c.webp')).toHaveAttribute('src', 'asset:///test/folder/c.webp');
   });
 
-  it('uses inspection thumbnails for local previews without Tauri asset URLs', async () => {
+  it('uses Tauri asset URLs for local previews', async () => {
     vi.mocked(fileDialog.openStitchingSources).mockResolvedValue({
       files: ['/test/a.jpg'], directories: [], cancelled: false,
     });
@@ -89,8 +89,8 @@ describe('StitchImagePage', () => {
     render(<StitchImagePage />);
     await user.click(screen.getByRole('button', { name: '添加图片' }));
 
-    expect(await screen.findByAltText('a.jpg')).toHaveAttribute('src', 'data:image/jpeg;base64,thumb-a');
-    expect(convertFileSrc).not.toHaveBeenCalled();
+    expect(await screen.findByAltText('a.jpg')).toHaveAttribute('src', 'asset:///test/a.jpg');
+    expect(convertFileSrc).toHaveBeenCalledWith('/test/a.jpg');
   });
 
   it('previews imported stitching images with cover fit inside each cell', async () => {
@@ -114,7 +114,32 @@ describe('StitchImagePage', () => {
     expect(preview).not.toHaveClass('object-contain');
   });
 
-  it('shows imported images progressively instead of waiting for every inspection to finish', async () => {
+  it('shows the complete image while editing a stitching cell', async () => {
+    vi.mocked(fileDialog.openStitchingSources).mockResolvedValue({
+      files: ['/test/tall.jpg'], directories: [], cancelled: false,
+    });
+    vi.mocked(stitchingCommands.inspectStitchingFile).mockResolvedValue(
+      createMockInspection({
+        sourcePath: '/test/tall.jpg',
+        sourceName: 'tall.jpg',
+        imageMetadata: { width: 400, height: 1200, extension: 'jpg' },
+        thumbnail: 'data:image/jpeg;base64,tall-thumb',
+      })
+    );
+
+    render(<StitchImagePage />);
+    await user.click(screen.getByRole('button', { name: '添加图片' }));
+
+    const preview = await screen.findByAltText('tall.jpg');
+    expect(preview).toHaveClass('object-cover');
+
+    await user.click(screen.getByRole('button', { name: '编辑' }));
+
+    expect(preview).toHaveClass('object-contain');
+    expect(preview).not.toHaveClass('object-cover');
+  });
+
+  it('fills layout cells after selected file inspections finish', async () => {
     let resolveA!: (value: InspectStitchingFileResult) => void;
     let resolveB!: (value: InspectStitchingFileResult) => void;
     const inspectionA = new Promise<InspectStitchingFileResult>((resolve) => { resolveA = resolve; });
@@ -133,12 +158,13 @@ describe('StitchImagePage', () => {
     await user.click(screen.getByRole('button', { name: '添加图片' }));
 
     resolveA(createMockInspection({ sourcePath: '/test/a.jpg', sourceName: 'a.jpg', thumbnail: 'data:image/jpeg;base64,thumb-a' }));
-    expect(await screen.findByAltText('a.jpg')).toHaveAttribute('src', 'data:image/jpeg;base64,thumb-a');
-    expect(screen.queryByAltText('b.jpg')).not.toBeInTheDocument();
+    expect(screen.queryByAltText('a.jpg')).not.toBeInTheDocument();
 
     resolveB(createMockInspection({ sourcePath: '/test/b.jpg', sourceName: 'b.jpg', thumbnail: 'data:image/jpeg;base64,thumb-b' }));
-    expect(await screen.findByAltText('b.jpg')).toHaveAttribute('src', 'data:image/jpeg;base64,thumb-b');
-    expect(convertFileSrc).not.toHaveBeenCalled();
+    expect(await screen.findByAltText('a.jpg')).toHaveAttribute('src', 'asset:///test/a.jpg');
+    expect(await screen.findByAltText('b.jpg')).toHaveAttribute('src', 'asset:///test/b.jpg');
+    expect(convertFileSrc).toHaveBeenCalledWith('/test/a.jpg');
+    expect(convertFileSrc).toHaveBeenCalledWith('/test/b.jpg');
   });
 
   it('infers same-as-source output directory from the first image when stitching', async () => {
