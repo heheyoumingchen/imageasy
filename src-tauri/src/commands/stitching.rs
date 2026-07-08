@@ -460,6 +460,7 @@ fn parse_background_color(value: &str) -> Result<Rgba<u8>> {
 fn output_file_name(base_stem: &str, naming_pattern: &str, output_format: &str, index: u32) -> String {
     let extension = output_format_extension(output_format);
     match naming_pattern {
+        "source-name-original" => format!("{}.{}", base_stem, extension),
         "source-name-date" => format!("{}-stitch-{}-{:03}.{}", base_stem, current_date_stamp(), index, extension),
         _ => format!("{}-stitch-{:03}.{}", base_stem, index, extension),
     }
@@ -568,5 +569,11 @@ mod tests {
             assert_ne!(placed.get_pixel(0, y).0[3], 0);
             assert_ne!(placed.get_pixel(24, y).0[3], 0);
         }
+    }
+
+    #[test]
+    fn stitching_original_name_uses_first_source_stem() {
+        assert_eq!(output_file_name("first", "source-name-original", "png", 1), "first.png");
+        assert_eq!(output_file_name("first", "source-name-index", "png", 1), "first-stitch-001.png");
     }
 }

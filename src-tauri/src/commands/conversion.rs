@@ -86,6 +86,10 @@ fn indexed_name(stem: &str, index: u32, output_format: &str) -> String {
     format!("{}-{:03}.{}", stem, index, output_format_extension(output_format))
 }
 
+fn original_name(stem: &str, output_format: &str) -> String {
+    format!("{}.{}", stem, output_format_extension(output_format))
+}
+
 
 #[tauri::command]
 pub fn inspect_conversion_file(path: String) -> Result<InspectConversionFileResult, String> {
@@ -258,6 +262,7 @@ fn render_document_to_images_impl(
         let page_number = rendered_page.page_number;
         let image = apply_color_mode(rendered_page.image, &request.color_mode);
         let file_name = match request.naming_pattern.as_str() {
+            "source-name-original" => original_name(stem, &request.output_format),
             "source-name-date" => dated_name(stem, page_number, &request.output_format),
             _ => indexed_name(stem, page_number, &request.output_format),
         };
@@ -279,11 +284,17 @@ mod tests {
     use image::{codecs::jpeg::JpegEncoder, ColorType, ImageBuffer, Rgb};
     use tempfile::tempdir;
 
-    use super::{current_date_stamp, dated_name, render_document_to_images_impl, RenderDocumentToImagesRequest};
+    use super::{current_date_stamp, dated_name, original_name, render_document_to_images_impl, RenderDocumentToImagesRequest};
 
     #[test]
     fn dated_name_appends_index_suffix() {
         assert_eq!(dated_name("demo", 2, "jpg"), format!("demo-{}-002.jpg", current_date_stamp()));
+    }
+
+    #[test]
+    fn original_name_uses_source_stem_and_output_extension() {
+        assert_eq!(original_name("demo", "webp"), "demo.webp");
+        assert_eq!(original_name("demo", "jpeg"), "demo.jpg");
     }
 
     #[test]
