@@ -3,7 +3,7 @@ import type { ConversionColorMode, ConversionOutputFormat, PageRangeMode } from 
 const colorModeLabelMap: Record<ConversionColorMode, string> = {
   rgb: 'RGB',
   cmyk: 'CMYK',
-  'gray-cmyk': '灰度 CMYK'
+  grayscale: '灰度'
 };
 
 type SummarySettings = {

@@ -321,7 +321,7 @@ describe('ConvertImagePage', () => {
 
   it('applies settings-store output settings to document summaries', async () => {
     const user = userEvent.setup();
-    setConversionSettings({ outputFormat: 'png', colorMode: 'gray-cmyk' });
+    setConversionSettings({ outputFormat: 'png', colorMode: 'grayscale' });
     vi.mocked(openConversionFiles).mockResolvedValue(['F:/demo/b.pdf']);
     vi.mocked(inspectConversionFile).mockResolvedValue({
       kind: 'document',
@@ -335,7 +335,7 @@ describe('ConvertImagePage', () => {
     render(<ConvertImagePage />);
     await user.click(screen.getByRole('button', { name: '添加文件' }));
 
-    expect(await screen.findByText('PNG / 灰度 CMYK / 全部页')).toBeInTheDocument();
+    expect(await screen.findByText('PNG / 灰度 / 全部页')).toBeInTheDocument();
   });
 
   it('uses a stem-based output name and settings-store format for image conversion', async () => {
@@ -632,7 +632,7 @@ describe('ConvertImagePage', () => {
 
     // 批次开始后改动公共设置与输出目录，进行中的批次应沿用启动时的快照。
     act(() => {
-      setConversionSettings({ outputFormat: 'webp', colorMode: 'gray-cmyk', quality: 42 });
+      setConversionSettings({ outputFormat: 'webp', colorMode: 'grayscale', quality: 42 });
       useConversionStore.getState().updateGlobalSettings({ outputDirectory: 'F:/changed' });
     });
 
@@ -696,7 +696,7 @@ describe('ConvertImagePage', () => {
     });
 
     act(() => {
-      setConversionSettings({ outputFormat: 'png', colorMode: 'gray-cmyk' });
+      setConversionSettings({ outputFormat: 'png', colorMode: 'grayscale' });
       useConversionStore.getState().updateGlobalSettings({
         outputDirectory: 'F:/changed',
         pageRangeMode: 'custom',

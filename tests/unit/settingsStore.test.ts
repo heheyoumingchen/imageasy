@@ -30,6 +30,8 @@ vi.mock('../../src/services/settingsCommands', () => ({
 describe('settingsStore', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    // 单例 store 在测试间共享，重置回默认值避免用例互相污染。
+    createSettingsStore().setState({ ...DEFAULT_SETTINGS });
   });
 
   it('uses defaults before settings are loaded from Tauri', () => {
@@ -56,6 +58,19 @@ describe('settingsStore', () => {
         errorMessage: null
       })
     );
+  });
+
+  it('normalizes legacy gray-cmyk export color mode to grayscale', async () => {
+    loadSettings.mockResolvedValue({
+      ...DEFAULT_SETTINGS,
+      exportSettings: { ...DEFAULT_SETTINGS.exportSettings, colorMode: 'gray-cmyk' }
+    });
+    const store = createSettingsStore();
+
+    const settings = await store.getState().load();
+
+    expect(settings?.exportSettings.colorMode).toBe('grayscale');
+    expect(store.getState().exportSettings.colorMode).toBe('grayscale');
   });
 
   it('saves updated settings through the Tauri settings command', async () => {

@@ -5,7 +5,7 @@ export type StitchingNamingPattern = 'source-name-index' | 'source-name-date';
 export type StitchingStatus = 'ready' | 'running' | 'success' | 'failed';
 export type StitchingResolution = 768 | 1080 | 1536 | 2160;
 export type StitchingQuality = number; // 0-100
-export type StitchingColorMode = 'rgb' | 'cmyk' | 'gray-cmyk';
+export type StitchingColorMode = 'rgb' | 'cmyk' | 'grayscale';
 
 export type StitchingImageMetadata = {
   width: number;

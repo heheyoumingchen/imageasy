@@ -1,6 +1,7 @@
 export type ConversionSourceKind = 'image' | 'document' | 'unsupported';
 export type ConversionOutputFormat = 'jpg' | 'png' | 'webp';
-export type ConversionColorMode = 'rgb' | 'cmyk' | 'gray-cmyk';
+export type ConversionColorMode = 'rgb' | 'cmyk' | 'grayscale';
+export type ConversionNamingPattern = 'source-name-index' | 'source-name-date' | 'source-name-original';
 export type ConversionStatus = 'ready' | 'running' | 'success' | 'failed' | 'unsupported';
 export type PageRangeMode = 'all' | 'custom';
 
@@ -64,5 +65,5 @@ export type RenderDocumentToImagesRequest = {
   colorMode: ConversionColorMode;
   pageNumbers: number[];
   renderDensity: 'standard' | 'high';
-  namingPattern: 'source-name-index' | 'source-name-date';
+  namingPattern: ConversionNamingPattern;
 };

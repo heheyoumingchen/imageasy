@@ -101,9 +101,10 @@ const SettingsPage = () => {
         namingPattern: 'Naming pattern',
         sourceNameIndex: 'Source name - index',
         sourceNameDate: 'Source name - date',
+        sourceNameOriginal: 'Original filename',
         outputFormat: 'Output format',
         colorMode: 'Color mode',
-        grayCmyk: 'Gray CMYK',
+        grayscale: 'Grayscale',
         outputQuality: 'Output quality',
       }
     : {
@@ -137,9 +138,10 @@ const SettingsPage = () => {
         namingPattern: '命名规则',
         sourceNameIndex: '原文件名-序号',
         sourceNameDate: '原文件名-日期-序号',
+        sourceNameOriginal: '原文件名',
         outputFormat: '导出格式',
         colorMode: '输出色彩模式',
-        grayCmyk: '灰度 CMYK',
+        grayscale: '灰度',
         outputQuality: '输出质量',
       };
 
@@ -197,9 +199,10 @@ const SettingsPage = () => {
     namingPattern: copy.namingPattern,
     sourceNameIndex: copy.sourceNameIndex,
     sourceNameDate: copy.sourceNameDate,
+    sourceNameOriginal: copy.sourceNameOriginal,
     outputFormat: copy.outputFormat,
     colorMode: copy.colorMode,
-    grayCmyk: copy.grayCmyk,
+    grayscale: copy.grayscale,
     outputDirectoryStrategy: copy.outputDirectoryStrategy,
     sameAsSource: copy.sameAsSource,
     custom: copy.custom,

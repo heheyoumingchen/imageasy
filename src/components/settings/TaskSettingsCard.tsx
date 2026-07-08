@@ -1,6 +1,6 @@
 import type { NamingPattern, OutputDirectoryStrategy } from '../../stores/settingsStore';
 
-export type TaskColorMode = 'rgb' | 'cmyk' | 'gray-cmyk';
+export type TaskColorMode = 'rgb' | 'cmyk' | 'grayscale';
 export type TaskOutputFormat = 'jpg' | 'png' | 'webp';
 
 export type TaskSettingsValue = {
@@ -15,9 +15,10 @@ export type TaskSettingsCardCopy = {
   namingPattern: string;
   sourceNameIndex: string;
   sourceNameDate: string;
+  sourceNameOriginal: string;
   outputFormat: string;
   colorMode: string;
-  grayCmyk: string;
+  grayscale: string;
   outputDirectoryStrategy: string;
   sameAsSource: string;
   custom: string;
@@ -91,6 +92,7 @@ export const TaskSettingsCard = ({
           >
             <option value="source-name-index">{copy.sourceNameIndex}</option>
             <option value="source-name-date">{copy.sourceNameDate}</option>
+            <option value="source-name-original">{copy.sourceNameOriginal}</option>
           </select>
           <ChevronIcon />
         </div>
@@ -129,7 +131,7 @@ export const TaskSettingsCard = ({
             >
               <option value="rgb">RGB</option>
               <option value="cmyk">CMYK</option>
-              <option value="gray-cmyk">{copy.grayCmyk}</option>
+              <option value="grayscale">{copy.grayscale}</option>
             </select>
             <ChevronIcon />
           </div>

@@ -24,7 +24,7 @@ export type InspectSplittingFileResult = {
   errorMessage: string | null;
 };
 
-export type SplittingColorMode = 'rgb' | 'cmyk' | 'gray-cmyk';
+export type SplittingColorMode = 'rgb' | 'cmyk' | 'grayscale';
 
 export type SplitImageFileRequest = {
   sourcePath: string;

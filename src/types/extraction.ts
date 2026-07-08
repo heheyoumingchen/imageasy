@@ -7,7 +7,7 @@ export type ExtractionDocumentInfo = {
 };
 
 export type ExtractionOutputFormat = 'png' | 'jpg';
-export type ExtractionColorMode = 'rgb' | 'cmyk' | 'gray-cmyk';
+export type ExtractionColorMode = 'rgb' | 'cmyk' | 'grayscale';
 export type ExtractionNamingPattern = 'source-name-index' | 'source-name-date';
 
 export type ExtractDocumentImagesRequest = {

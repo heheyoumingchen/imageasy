@@ -6,9 +6,9 @@ let settingsStore: ReturnType<typeof createSettingsStoreInternal> | null = null;
 
 export type OutputDirectoryStrategy = 'same-as-source' | 'custom';
 
-export type NamingPattern = 'source-name-index' | 'source-name-date';
+export type NamingPattern = 'source-name-index' | 'source-name-date' | 'source-name-original';
 
-export type ExportColorMode = 'rgb' | 'cmyk' | 'gray-cmyk';
+export type ExportColorMode = 'rgb' | 'cmyk' | 'grayscale';
 export type ExportOutputFormat = 'jpg' | 'png' | 'webp';
 
 // 四个功能（转换 / 提取 / 分割 / 拼接）现已共享同一份导出设置。
@@ -51,6 +51,19 @@ export const DEFAULT_SETTINGS: PersistedSettings = {
   }
 };
 
+// 旧版本导出色彩模式使用 gray-cmyk（灰度后转 CMYK），现统一迁移为单通道 grayscale。
+const normalizeExportSettings = (
+  settings: (Partial<ExportTaskSettings> & { colorMode?: ExportColorMode | 'gray-cmyk' }) | null | undefined
+): ExportTaskSettings => {
+  const colorMode = settings?.colorMode === 'gray-cmyk' ? 'grayscale' : settings?.colorMode;
+
+  return {
+    ...DEFAULT_SETTINGS.exportSettings,
+    ...settings,
+    colorMode: colorMode ?? DEFAULT_SETTINGS.exportSettings.colorMode
+  };
+};
+
 // 旧版本持久化文件按 conversion/extraction/splitting/stitching 四块存储，
 // 迁移时优先沿用 conversion 作为统一导出设置，避免老配置丢失。
 const normalizeSettings = (settings: Partial<PersistedSettings> & { conversion?: Partial<ExportTaskSettings> } | null | undefined): PersistedSettings => ({
@@ -60,7 +73,7 @@ const normalizeSettings = (settings: Partial<PersistedSettings> & { conversion?:
   outputDirectoryStrategy: settings?.outputDirectoryStrategy ?? DEFAULT_SETTINGS.outputDirectoryStrategy,
   defaultOutputDirectory: settings?.defaultOutputDirectory ?? DEFAULT_SETTINGS.defaultOutputDirectory,
   rememberLastParams: settings?.rememberLastParams ?? DEFAULT_SETTINGS.rememberLastParams,
-  exportSettings: { ...DEFAULT_SETTINGS.exportSettings, ...settings?.conversion, ...settings?.exportSettings }
+  exportSettings: normalizeExportSettings({ ...settings?.conversion, ...settings?.exportSettings })
 });
 
 const createSettingsStoreInternal = () => {

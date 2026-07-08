@@ -209,7 +209,7 @@ describe('ExtractImagePage', () => {
     const user = userEvent.setup();
     vi.mocked(openExtractionDocuments).mockResolvedValue(['F:/Demo/产品手册.docx']);
     getSettingsStore().setState({
-      exportSettings: { outputFormat: 'jpg', colorMode: 'gray-cmyk', namingPattern: 'source-name-date', quality: 90 }
+      exportSettings: { outputFormat: 'jpg', colorMode: 'grayscale', namingPattern: 'source-name-date', quality: 90 }
     });
 
     render(<ExtractImagePage />);
@@ -235,7 +235,7 @@ describe('ExtractImagePage', () => {
         sourcePath: 'F:/Demo/产品手册.docx',
         outputDirectory: 'F:/Demo',
         outputFormat: 'jpg',
-        colorMode: 'gray-cmyk',
+        colorMode: 'grayscale',
         quality: 90,
         namingPattern: 'source-name-date',
         includeOutputPaths: false

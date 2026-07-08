@@ -49,11 +49,11 @@ describe('conversionStore', () => {
   it('reads output format and color mode from settings store for document summaries', () => {
     useConversionStore.getState().setItems([readyDocument]);
     getSettingsStore().setState({
-      exportSettings: { ...DEFAULT_SETTINGS.exportSettings, outputFormat: 'png', colorMode: 'gray-cmyk' }
+      exportSettings: { ...DEFAULT_SETTINGS.exportSettings, outputFormat: 'png', colorMode: 'grayscale' }
     });
     useConversionStore.getState().updateGlobalSettings({ pageRangeMode: 'all', pageRangeText: '' });
 
-    expect(useConversionStore.getState().buildItemSummary('b')).toBe('PNG / 灰度 CMYK / 全部页');
+    expect(useConversionStore.getState().buildItemSummary('b')).toBe('PNG / 灰度 / 全部页');
   });
 
   it('supports single-item page-range overrides without changing the batch color mode', () => {
