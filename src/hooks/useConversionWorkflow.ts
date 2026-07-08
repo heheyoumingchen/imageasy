@@ -9,7 +9,8 @@ import { useDragDropImport } from './useDragDropImport';
 import { openConversionSources, openConversionFiles, chooseOutputDirectory, openDirectoryInSystem } from '../services/fileDialog';
 import { getSettingsStore } from './useSettingsStore';
 import { useConversionStore } from '../stores/conversionStore';
-import type { ConversionItem, ConversionOutputFormat, ConversionColorMode, ConversionOutputSettings, InspectConversionFileResult } from '../types/conversion';
+import type { ConversionItem, ConversionOutputFormat, ConversionColorMode, ConversionNamingPattern, ConversionOutputSettings, InspectConversionFileResult } from '../types/conversion';
+import { buildImageOutputName, joinOutputPath, willOverwriteSource } from '../utils/conversionOutputPaths';
 import { expandPageRange } from '../utils/pageRange';
 import { sourceDirectory } from '../utils/paths';
 import { toErrorMessage } from '../utils/errors';
@@ -17,10 +18,12 @@ import { runConcurrentQueue } from '../utils/batchQueue';
 
 // 转换专属参数（来自 conversionStore）与公共导出设置（来自 exportSettings）合并后的批次快照。
 type ConversionBatchSettings = ConversionOutputSettings & {
-  namingPattern: 'source-name-index' | 'source-name-date';
+  namingPattern: ConversionNamingPattern;
   outputFormat: ConversionOutputFormat;
   colorMode: ConversionColorMode;
   quality: number;
+  // 同一批次共享一个日期戳，避免逐张生成时刻不同导致文件名不一致。
+  dateStamp: string;
 };
 
 const toItem = (result: InspectConversionFileResult): ConversionItem => ({
@@ -38,23 +41,13 @@ const toItem = (result: InspectConversionFileResult): ConversionItem => ({
   outputPaths: []
 });
 
-const buildImageOutputName = (item: ConversionItem, settings: ConversionBatchSettings) => {
-  const targetExtension = settings.outputFormat;
-  const stamp = new Date().toISOString().slice(0, 10).replace(/-/g, '');
-
-  return settings.namingPattern === 'source-name-date'
-    ? `${item.sourceStem}-${stamp}-001.${targetExtension}`
-    : `${item.sourceStem}-001.${targetExtension}`;
-};
-
 const buildImageConversionRequest = (item: ConversionItem, settings: ConversionBatchSettings) => {
   const outputName = buildImageOutputName(item, settings);
-  const outputFormat = (outputName.split('.').pop() ?? settings.outputFormat) as ConversionOutputFormat;
 
   return {
     sourcePath: item.sourcePath,
-    outputPath: `${settings.outputDirectory}/${outputName}`,
-    outputFormat,
+    outputPath: joinOutputPath(settings.outputDirectory, outputName),
+    outputFormat: settings.outputFormat,
     colorMode: settings.colorMode,
     quality: settings.quality
   };
@@ -219,7 +212,8 @@ export const useConversionWorkflow = () => {
     }
 
     const exportSettings = settingsState.exportSettings;
-    const batchSettings: ConversionBatchSettings = { ...globalSettings, ...exportSettings, outputDirectory };
+    const dateStamp = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+    const batchSettings: ConversionBatchSettings = { ...globalSettings, ...exportSettings, outputDirectory, dateStamp };
 
     for (const item of readyItems.filter((entry) => entry.kind === 'document')) {
       try {
@@ -228,6 +222,14 @@ export const useConversionWorkflow = () => {
         setPageError(toErrorMessage(error));
         return;
       }
+    }
+
+    // 原文件名 + 源文件同目录时，输出会替换原始图片；批量开始前统一确认一次。
+    const replacingSource = readyItems
+      .filter((item) => item.kind === 'image')
+      .some((item) => willOverwriteSource(item, batchSettings));
+    if (replacingSource && !window.confirm('当前设置会替换源文件同目录下的原始图片。是否继续？')) {
+      return;
     }
 
     setIsRunning(true);
