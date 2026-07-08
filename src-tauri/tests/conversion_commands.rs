@@ -88,7 +88,7 @@ fn convert_image_file_reencodes_jpeg_family_to_requested_jpg_name() {
         source_path: source.to_string_lossy().into_owned(),
         output_path: target.to_string_lossy().into_owned(),
         output_format: "jpg".into(),
-        color_mode: "gray-cmyk".into(),
+        color_mode: "grayscale".into(),
         quality: Some(80),
     })
     .unwrap();
@@ -98,6 +98,54 @@ fn convert_image_file_reencodes_jpeg_family_to_requested_jpg_name() {
 
     assert_eq!(output_path.file_name().unwrap().to_string_lossy(), "result.jpg");
     assert_eq!(output.dimensions(), (10, 8));
+}
+
+#[test]
+fn convert_image_file_writes_single_channel_grayscale_png() {
+    let dir = tempdir().unwrap();
+    let source = dir.path().join("source.png");
+    let target = dir.path().join("out.png");
+
+    ImageBuffer::<Rgb<u8>, _>::from_pixel(2, 2, Rgb([10, 120, 240]))
+        .save(&source)
+        .unwrap();
+
+    let output_paths = convert_image_file(ConvertImageFileRequest {
+        source_path: source.to_string_lossy().into_owned(),
+        output_path: target.to_string_lossy().into_owned(),
+        output_format: "png".into(),
+        color_mode: "grayscale".into(),
+        quality: Some(90),
+    })
+    .unwrap();
+
+    assert_eq!(output_paths.len(), 1);
+    let decoded = image::open(&output_paths[0]).unwrap();
+    assert!(matches!(decoded, image::DynamicImage::ImageLuma8(_)));
+}
+
+#[test]
+fn convert_image_file_writes_single_channel_grayscale_webp() {
+    let dir = tempdir().unwrap();
+    let source = dir.path().join("source.png");
+    let target = dir.path().join("out.webp");
+
+    ImageBuffer::<Rgb<u8>, _>::from_pixel(4, 4, Rgb([10, 120, 240]))
+        .save(&source)
+        .unwrap();
+
+    let output_paths = convert_image_file(ConvertImageFileRequest {
+        source_path: source.to_string_lossy().into_owned(),
+        output_path: target.to_string_lossy().into_owned(),
+        output_format: "webp".into(),
+        color_mode: "grayscale".into(),
+        quality: Some(90),
+    })
+    .unwrap();
+
+    assert_eq!(output_paths.len(), 1);
+    let decoded = image::open(&output_paths[0]).unwrap();
+    assert_eq!(decoded.dimensions(), (4, 4));
 }
 
 

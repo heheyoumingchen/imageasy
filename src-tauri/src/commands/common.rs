@@ -25,8 +25,13 @@ pub fn current_date_stamp() -> String {
 
 pub fn apply_color_mode(image: DynamicImage, color_mode: &str) -> DynamicImage {
     match color_mode {
-        "gray-cmyk" => DynamicImage::ImageLuma8(image.grayscale().to_luma8()),
-        _ => DynamicImage::ImageRgb8(image.to_rgb8()),
+        // 兼容旧配置里的 gray-cmyk；两者都输出真正的单通道灰度。
+        "grayscale" | "gray-cmyk" => DynamicImage::ImageLuma8(image.into_luma8()),
+        // 已经是 RGB8 时避免重复转换拷贝。
+        _ => match image {
+            DynamicImage::ImageRgb8(_) => image,
+            other => DynamicImage::ImageRgb8(other.into_rgb8()),
+        },
     }
 }
 
@@ -41,17 +46,20 @@ pub fn write_dynamic_image(
     let mut writer = BufWriter::new(file);
 
     match image {
-        DynamicImage::ImageLuma8(luma) if normalized_format(output_format) != "webp" => {
+        DynamicImage::ImageLuma8(luma) => {
             let (width, height) = luma.dimensions();
             match normalized_format(output_format).as_str() {
                 "jpg" => JpegEncoder::new_with_quality(&mut writer, quality.unwrap_or(90))
                     .encode(luma, width, height, ColorType::L8.into())?,
                 "png" => PngEncoder::new(&mut writer).write_image(luma, width, height, ColorType::L8.into())?,
+                // WebP 无损编码器支持单通道 L8，灰度直接写入不再回退到 RGB。
+                "webp" => WebPEncoder::new_lossless(&mut writer).encode(luma, width, height, ColorType::L8.into())?,
                 other => anyhow::bail!("不支持的输出格式: {other}"),
             }
         }
         _ => {
-            let rgb = image.to_rgb8();
+            // 已是 RGB8 时避免多一次拷贝，其它类型再转换。
+            let rgb = image.as_rgb8().cloned().unwrap_or_else(|| image.to_rgb8());
             let (width, height) = rgb.dimensions();
             match normalized_format(output_format).as_str() {
                 "jpg" => JpegEncoder::new_with_quality(&mut writer, quality.unwrap_or(90))
