@@ -57,7 +57,7 @@ pub struct StitchLayoutCell {
 }
 
 /// 拼接缩略图缓存目录
-fn stitching_thumbnail_cache_dir() -> PathBuf {
+pub fn stitching_thumbnail_cache_dir() -> PathBuf {
     if let Some(cache) = crate::portable::portable_cache_dir() {
         cache.join("stitching-thumbnails")
     } else {
@@ -389,6 +389,15 @@ fn inside_rounded_rect(x: u32, y: u32, width: u32, height: u32, radius: u32) -> 
     }
 }
 
+// 将 cover 后的粘贴偏移夹紧，使缩放后的图片始终完整覆盖方格，避免拖动到边缘时露出透明白边。
+// resized_size 恒 >= target_size（cover 保证），因此合法粘贴范围是 [target_size - resized_size, 0]。
+fn clamp_cover_paste_offset(center: f32, requested_offset: f32, target_size: u32, resized_size: u32) -> i64 {
+    let raw = center + requested_offset * target_size as f32;
+    let min = target_size as i64 - resized_size as i64;
+    let max = 0i64;
+    (raw.round() as i64).clamp(min.min(max), max)
+}
+
 // 在 cover（等比铺满、超出不显示）基础上应用缩放与自由位移。
 // 默认 scale=1 时图片等比缩放使短边贴合方格，长边超出方格并被 tile 边界隐藏。
 // 示例：原图 50x150，方格 25x25 → 缩放为 25x75（宽度贴合，高度上下超出并隐藏）。
@@ -416,8 +425,8 @@ fn object_cover_transform(
     let mut tile = ImageBuffer::from_pixel(target_width, target_height, Rgba([0, 0, 0, 0]));
     let center_x = (target_width as f32 - resize_width as f32) / 2.0;
     let center_y = (target_height as f32 - resize_height as f32) / 2.0;
-    let paste_x = (center_x + offset_x * target_width as f32).round() as i64;
-    let paste_y = (center_y + offset_y * target_height as f32).round() as i64;
+    let paste_x = clamp_cover_paste_offset(center_x, offset_x, target_width, resize_width);
+    let paste_y = clamp_cover_paste_offset(center_y, offset_y, target_height, resize_height);
     imageops::overlay(&mut tile, &resized.to_rgba8(), paste_x, paste_y);
     DynamicImage::ImageRgba8(tile)
 }
@@ -523,4 +532,41 @@ fn stitch_image_files_impl(request: StitchImageFilesRequest) -> Result<StitchIma
         output_path: output_path.to_string_lossy().into_owned(),
         stitched_count,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use image::{DynamicImage, ImageBuffer, Rgb};
+
+    #[test]
+    fn object_cover_transform_clamps_positive_offset_to_keep_cell_covered() {
+        // 竖长图导入方格后被拖到极端位置，方格边缘不应出现透明像素（白边）。
+        let source = DynamicImage::ImageRgb8(ImageBuffer::<Rgb<u8>, _>::from_pixel(50, 150, Rgb([20, 40, 60])));
+        let placed = object_cover_transform(&source, 25, 25, 1.0, 1.0, 1.0).to_rgba8();
+
+        for x in 0..25 {
+            assert_ne!(placed.get_pixel(x, 0).0[3], 0);
+            assert_ne!(placed.get_pixel(x, 24).0[3], 0);
+        }
+        for y in 0..25 {
+            assert_ne!(placed.get_pixel(0, y).0[3], 0);
+            assert_ne!(placed.get_pixel(24, y).0[3], 0);
+        }
+    }
+
+    #[test]
+    fn object_cover_transform_clamps_negative_offset_to_keep_cell_covered() {
+        let source = DynamicImage::ImageRgb8(ImageBuffer::<Rgb<u8>, _>::from_pixel(150, 50, Rgb([20, 40, 60])));
+        let placed = object_cover_transform(&source, 25, 25, 1.0, -1.0, -1.0).to_rgba8();
+
+        for x in 0..25 {
+            assert_ne!(placed.get_pixel(x, 0).0[3], 0);
+            assert_ne!(placed.get_pixel(x, 24).0[3], 0);
+        }
+        for y in 0..25 {
+            assert_ne!(placed.get_pixel(0, y).0[3], 0);
+            assert_ne!(placed.get_pixel(24, y).0[3], 0);
+        }
+    }
 }
