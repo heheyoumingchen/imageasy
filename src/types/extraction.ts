@@ -8,7 +8,7 @@ export type ExtractionDocumentInfo = {
 
 export type ExtractionOutputFormat = 'png' | 'jpg';
 export type ExtractionColorMode = 'rgb' | 'cmyk' | 'grayscale';
-export type ExtractionNamingPattern = 'source-name-index' | 'source-name-date';
+export type ExtractionNamingPattern = 'source-name-index' | 'source-name-date' | 'source-name-original';
 
 export type ExtractDocumentImagesRequest = {
   sourcePath: string;

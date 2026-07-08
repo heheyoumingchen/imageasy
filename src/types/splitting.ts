@@ -1,7 +1,7 @@
 export type SplittingSourceKind = 'image' | 'pdf' | 'unsupported';
 export type SplittingOutputFormat = 'jpg' | 'png' | 'webp';
 export type SplittingMode = 'horizontal' | 'vertical' | 'grid';
-export type SplittingNamingPattern = 'source-name-index' | 'source-name-date';
+export type SplittingNamingPattern = 'source-name-index' | 'source-name-date' | 'source-name-original';
 export type SplittingStatus = 'ready' | 'running' | 'success' | 'failed';
 
 export type SplittingImageMetadata = {

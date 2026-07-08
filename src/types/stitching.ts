@@ -1,7 +1,7 @@
 import type { CanvasRatio } from './stitchingLayout';
 
 export type StitchingOutputFormat = 'jpg' | 'png' | 'webp';
-export type StitchingNamingPattern = 'source-name-index' | 'source-name-date';
+export type StitchingNamingPattern = 'source-name-index' | 'source-name-date' | 'source-name-original';
 export type StitchingStatus = 'ready' | 'running' | 'success' | 'failed';
 export type StitchingResolution = 768 | 1080 | 1536 | 2160;
 export type StitchingQuality = number; // 0-100

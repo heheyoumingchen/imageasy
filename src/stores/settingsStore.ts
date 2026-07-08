@@ -53,7 +53,7 @@ export const DEFAULT_SETTINGS: PersistedSettings = {
 
 // 旧版本导出色彩模式使用 gray-cmyk（灰度后转 CMYK），现统一迁移为单通道 grayscale。
 const normalizeExportSettings = (
-  settings: (Partial<ExportTaskSettings> & { colorMode?: ExportColorMode | 'gray-cmyk' }) | null | undefined
+  settings: (Omit<Partial<ExportTaskSettings>, 'colorMode'> & { colorMode?: ExportColorMode | 'gray-cmyk' }) | null | undefined
 ): ExportTaskSettings => {
   const colorMode = settings?.colorMode === 'gray-cmyk' ? 'grayscale' : settings?.colorMode;
 
