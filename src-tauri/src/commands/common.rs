@@ -73,3 +73,30 @@ pub fn write_dynamic_image(
 
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use image::{DynamicImage, ImageBuffer, Rgb};
+
+    #[test]
+    fn rgb_color_mode_keeps_rgb_images_rgb() {
+        let source = DynamicImage::ImageRgb8(ImageBuffer::<Rgb<u8>, _>::from_pixel(2, 2, Rgb([1, 2, 3])));
+        let output = apply_color_mode(source, "rgb");
+        assert!(matches!(output, DynamicImage::ImageRgb8(_)));
+    }
+
+    #[test]
+    fn grayscale_color_mode_returns_single_channel_luma() {
+        let source = DynamicImage::ImageRgb8(ImageBuffer::<Rgb<u8>, _>::from_pixel(2, 2, Rgb([1, 2, 3])));
+        let output = apply_color_mode(source, "grayscale");
+        assert!(matches!(output, DynamicImage::ImageLuma8(_)));
+    }
+
+    #[test]
+    fn legacy_gray_cmyk_still_maps_to_single_channel_luma() {
+        let source = DynamicImage::ImageRgb8(ImageBuffer::<Rgb<u8>, _>::from_pixel(2, 2, Rgb([1, 2, 3])));
+        let output = apply_color_mode(source, "gray-cmyk");
+        assert!(matches!(output, DynamicImage::ImageLuma8(_)));
+    }
+}
