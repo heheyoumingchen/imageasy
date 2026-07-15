@@ -31,4 +31,28 @@ url = "2"
 walkdir = "2.5"
 rayon = "1.10"
 zip = { version = "2", default-features = false, features = ["deflate"] }
+webpx = { version = "0.4", default-features = false, features = ["encode", "std"] }
+sysinfo = { version = "0.37", default-features = false, features = ["system"] }
+tokio = { version = "1", features = ["sync", "rt", "macros", "time"] }
+
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.61", features = [
+  "Win32_Foundation",
+  "Win32_System_Com",
+  "Win32_System_Ole",
+  "Win32_System_Variant",
+] }
+
+[features]
+# 仅用于 conversion_benchmark 示例：编译可复现的性能证据采集代码。
+benchmarking = []
+
+[[example]]
+name = "conversion_benchmark"
+required-features = ["benchmarking"]
+
+[[bin]]
+name = "document-renderer-helper"
+path = "src/bin/document_renderer_helper.rs"
+
 [dev-dependencies]
