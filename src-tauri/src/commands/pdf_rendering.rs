@@ -343,7 +343,10 @@ pub fn convert_bitmap_view(
     }
 }
 
-fn convert_pdfium_bitmap(bitmap: &PdfBitmap<'_>) -> Result<DynamicImage> {
+fn convert_pdfium_bitmap(
+    bitmap: &PdfBitmap<'_>,
+    output_format: BitmapOutputFormat,
+) -> Result<DynamicImage> {
     let width = u32::try_from(bitmap.width()).context("PDF 位图宽度无效")?;
     let height = u32::try_from(bitmap.height()).context("PDF 位图高度无效")?;
     let format = match bitmap.format()? {
@@ -369,7 +372,7 @@ fn convert_pdfium_bitmap(bitmap: &PdfBitmap<'_>) -> Result<DynamicImage> {
             bytes: &bytes,
             background: [255, 255, 255],
         },
-        BitmapOutputFormat::Rgb,
+        output_format,
     )
 }
 
@@ -396,6 +399,27 @@ pub fn render_pdf_pages_with_callback<F>(
     resource_dir: Option<&Path>,
     page_numbers: &[u32],
     render_density: &str,
+    on_page: F,
+) -> Result<()>
+where
+    F: FnMut(RenderedPdfPage) -> Result<()>,
+{
+    render_pdf_pages_with_format(
+        source_path,
+        resource_dir,
+        page_numbers,
+        render_density,
+        BitmapOutputFormat::Rgb,
+        on_page,
+    )
+}
+
+pub fn render_pdf_pages_with_format<F>(
+    source_path: &Path,
+    resource_dir: Option<&Path>,
+    page_numbers: &[u32],
+    render_density: &str,
+    output_format: BitmapOutputFormat,
     mut on_page: F,
 ) -> Result<()>
 where
@@ -415,7 +439,7 @@ where
         let page = document.pages().get(page_index)?;
         let bitmap =
             page.render_with_config(&PdfRenderConfig::new().set_target_width(target_width))?;
-        let image = convert_pdfium_bitmap(&bitmap)?;
+        let image = convert_pdfium_bitmap(&bitmap, output_format)?;
         drop(bitmap);
         on_page(RenderedPdfPage { page_number, image })?;
     }
