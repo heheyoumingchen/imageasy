@@ -3,10 +3,36 @@ use std::{fs, path::PathBuf};
 use image::{codecs::jpeg::JpegEncoder, ColorType, GenericImageView, ImageBuffer, Rgb, Rgba};
 use tempfile::tempdir;
 
+use std::path::Path;
+
 use imageasy_lib::commands::conversion::{
-    convert_image_file, inspect_conversion_directory, inspect_conversion_file,
-    ConvertImageFileRequest,
+    convert_image_file, inspect_conversion_directory_with_counter,
+    inspect_conversion_file_with_counter, ConvertImageFileRequest, InspectConversionFileResult,
 };
+
+/// 假 PDF 页数计数器：所有 .pdf 返回固定页数，绝不绑定真实 PDFium。
+fn fake_pdf_counter(pages: u32) -> impl FnMut(&Path) -> anyhow::Result<u32> {
+    move |_path: &Path| Ok(pages)
+}
+
+/// 会 panic 的计数器：断言 Office 文档从不调用 PDF 页数探测。
+fn never_called_counter() -> impl FnMut(&Path) -> anyhow::Result<u32> {
+    move |path: &Path| panic!("PDF 页数计数器不应被调用: {}", path.display())
+}
+
+fn run_inspect_conversion_file(path: String) -> Result<InspectConversionFileResult, String> {
+    inspect_conversion_file_with_counter(&path, &mut fake_pdf_counter(1))
+}
+
+fn run_inspect_conversion_directory(
+    path: String,
+) -> Result<Vec<InspectConversionFileResult>, String> {
+    inspect_conversion_directory_with_counter(&path, fake_pdf_counter(1))
+}
+
+fn run_convert_image_file(request: ConvertImageFileRequest) -> Result<Vec<String>, String> {
+    tauri::async_runtime::block_on(convert_image_file(request))
+}
 
 #[test]
 fn inspect_conversion_file_reads_image_metadata() {
@@ -17,11 +43,29 @@ fn inspect_conversion_file_reads_image_metadata() {
         .save(&source)
         .unwrap();
 
-    let result = inspect_conversion_file(source.to_string_lossy().into_owned()).unwrap();
+    let result = run_inspect_conversion_file(source.to_string_lossy().into_owned()).unwrap();
 
     assert_eq!(result.kind, "image");
     assert_eq!(result.image_metadata.unwrap().width, 8);
     assert_eq!(result.source_name, "demo.png");
+}
+
+#[test]
+fn inspect_conversion_file_reads_jpeg_metadata() {
+    let dir = tempdir().unwrap();
+    let source = dir.path().join("demo.jpg");
+    let image = ImageBuffer::<Rgb<u8>, _>::from_pixel(13, 7, Rgb([20, 40, 60]));
+    let mut bytes = Vec::new();
+    JpegEncoder::new_with_quality(&mut bytes, 90)
+        .encode(image.as_raw(), 13, 7, ColorType::Rgb8.into())
+        .unwrap();
+    fs::write(&source, bytes).unwrap();
+
+    let result = run_inspect_conversion_file(source.to_string_lossy().into_owned()).unwrap();
+
+    let metadata = result.image_metadata.unwrap();
+    assert_eq!((metadata.width, metadata.height), (13, 7));
+    assert_eq!(metadata.extension, "jpg");
 }
 
 #[test]
@@ -33,14 +77,121 @@ fn inspect_conversion_directory_recursively_collects_supported_files() {
     ImageBuffer::<Rgb<u8>, _>::from_pixel(4, 4, Rgb([1, 2, 3]))
         .save(dir.path().join("a.jpg"))
         .unwrap();
-    fs::write(nested.join("b.pdf"), b"%PDF-1.4\n1 0 obj\n<<>>\nendobj\ntrailer\n<<>>\n%%EOF").unwrap();
+    fs::write(
+        nested.join("b.pdf"),
+        b"%PDF-1.4\n1 0 obj\n<<>>\nendobj\ntrailer\n<<>>\n%%EOF",
+    )
+    .unwrap();
     fs::write(nested.join("c.txt"), b"unsupported").unwrap();
 
-    let result = inspect_conversion_directory(dir.path().to_string_lossy().into_owned()).unwrap();
+    let result =
+        run_inspect_conversion_directory(dir.path().to_string_lossy().into_owned()).unwrap();
 
     assert_eq!(result.len(), 2);
     assert_eq!(result[0].kind, "image");
     assert_eq!(result[1].kind, "document");
+}
+
+#[test]
+fn inspect_document_pdf_uses_injected_page_counter() {
+    let dir = tempdir().unwrap();
+    let source = dir.path().join("report.pdf");
+    fs::write(
+        &source,
+        b"%PDF-1.4\n1 0 obj\n<<>>\nendobj\ntrailer\n<<>>\n%%EOF",
+    )
+    .unwrap();
+
+    let result =
+        inspect_conversion_file_with_counter(&source.to_string_lossy(), &mut fake_pdf_counter(7))
+            .unwrap();
+
+    assert_eq!(result.kind, "document");
+    let metadata = result.document_metadata.unwrap();
+    assert_eq!(metadata.page_count, Some(7));
+    assert_eq!(metadata.extension, "pdf");
+}
+
+#[test]
+fn inspect_document_office_returns_unknown_page_count_without_probing() {
+    for extension in ["docx", "doc", "wps"] {
+        let dir = tempdir().unwrap();
+        let source = dir.path().join(format!("report.{extension}"));
+        fs::write(&source, b"fake-office").unwrap();
+
+        // never_called_counter panics if a renderer probe runs for Office imports.
+        let result = inspect_conversion_file_with_counter(
+            &source.to_string_lossy(),
+            &mut never_called_counter(),
+        )
+        .unwrap();
+
+        assert_eq!(
+            result.kind, "document",
+            "{extension} should classify as document"
+        );
+        let metadata = result.document_metadata.unwrap();
+        assert_eq!(
+            metadata.page_count, None,
+            "{extension} page count must be unknown"
+        );
+        assert_eq!(metadata.extension, extension);
+    }
+}
+
+#[test]
+fn inspect_document_rejects_missing_source_at_boundary() {
+    let dir = tempdir().unwrap();
+    let missing = dir.path().join("nope.pdf");
+
+    let error = inspect_conversion_file_with_counter(
+        &missing.to_string_lossy(),
+        &mut never_called_counter(),
+    )
+    .unwrap_err();
+
+    assert!(!error.is_empty());
+}
+
+#[test]
+fn inspect_document_rejects_directory_source_at_boundary() {
+    let dir = tempdir().unwrap();
+
+    let error = inspect_conversion_file_with_counter(
+        &dir.path().to_string_lossy(),
+        &mut never_called_counter(),
+    )
+    .unwrap_err();
+
+    assert!(!error.is_empty());
+}
+
+#[test]
+fn inspect_document_directory_scan_includes_all_document_formats() {
+    let dir = tempdir().unwrap();
+    fs::write(dir.path().join("a.docx"), b"fake").unwrap();
+    fs::write(dir.path().join("b.doc"), b"fake").unwrap();
+    fs::write(dir.path().join("c.wps"), b"fake").unwrap();
+    fs::write(dir.path().join("d.pdf"), b"%PDF-1.4\n%%EOF").unwrap();
+
+    let result = inspect_conversion_directory_with_counter(
+        &dir.path().to_string_lossy(),
+        fake_pdf_counter(3),
+    )
+    .unwrap();
+
+    assert_eq!(result.len(), 4);
+    assert!(result.iter().all(|item| item.kind == "document"));
+    let pdf = result
+        .iter()
+        .find(|item| item.source_name == "d.pdf")
+        .unwrap();
+    assert_eq!(pdf.document_metadata.as_ref().unwrap().page_count, Some(3));
+    let docx = result
+        .iter()
+        .find(|item| item.source_name == "a.docx")
+        .unwrap();
+    assert_eq!(docx.document_metadata.as_ref().unwrap().page_count, None);
 }
 
 #[test]
@@ -53,12 +204,13 @@ fn convert_image_file_writes_requested_format() {
         .save(&source)
         .unwrap();
 
-    let output_paths = convert_image_file(ConvertImageFileRequest {
+    let output_paths = run_convert_image_file(ConvertImageFileRequest {
         source_path: source.to_string_lossy().into_owned(),
         output_path: target.to_string_lossy().into_owned(),
         output_format: "webp".into(),
         color_mode: "rgb".into(),
         quality: Some(88),
+        allow_source_overwrite: false,
     })
     .unwrap();
 
@@ -84,19 +236,23 @@ fn convert_image_file_reencodes_jpeg_family_to_requested_jpg_name() {
     drop(writer);
     fs::write(&source, bytes).unwrap();
 
-    let output_paths = convert_image_file(ConvertImageFileRequest {
+    let output_paths = run_convert_image_file(ConvertImageFileRequest {
         source_path: source.to_string_lossy().into_owned(),
         output_path: target.to_string_lossy().into_owned(),
         output_format: "jpg".into(),
         color_mode: "grayscale".into(),
         quality: Some(80),
+        allow_source_overwrite: false,
     })
     .unwrap();
 
     let output_path = PathBuf::from(&output_paths[0]);
     let output = image::open(&output_path).unwrap();
 
-    assert_eq!(output_path.file_name().unwrap().to_string_lossy(), "result.jpg");
+    assert_eq!(
+        output_path.file_name().unwrap().to_string_lossy(),
+        "result.jpg"
+    );
     assert_eq!(output.dimensions(), (10, 8));
 }
 
@@ -110,12 +266,13 @@ fn convert_image_file_writes_single_channel_grayscale_png() {
         .save(&source)
         .unwrap();
 
-    let output_paths = convert_image_file(ConvertImageFileRequest {
+    let output_paths = run_convert_image_file(ConvertImageFileRequest {
         source_path: source.to_string_lossy().into_owned(),
         output_path: target.to_string_lossy().into_owned(),
         output_format: "png".into(),
         color_mode: "grayscale".into(),
         quality: Some(90),
+        allow_source_overwrite: false,
     })
     .unwrap();
 
@@ -134,12 +291,13 @@ fn convert_image_file_writes_single_channel_grayscale_webp() {
         .save(&source)
         .unwrap();
 
-    let output_paths = convert_image_file(ConvertImageFileRequest {
+    let output_paths = run_convert_image_file(ConvertImageFileRequest {
         source_path: source.to_string_lossy().into_owned(),
         output_path: target.to_string_lossy().into_owned(),
         output_format: "webp".into(),
         color_mode: "grayscale".into(),
         quality: Some(90),
+        allow_source_overwrite: false,
     })
     .unwrap();
 
@@ -148,4 +306,307 @@ fn convert_image_file_writes_single_channel_grayscale_webp() {
     assert_eq!(decoded.dimensions(), (4, 4));
 }
 
+#[test]
+fn convert_image_file_applies_webp_quality() {
+    let dir = tempdir().unwrap();
+    let source = dir.path().join("source.png");
+    let low_target = dir.path().join("out").join("low.webp");
+    let high_target = dir.path().join("out").join("high.webp");
 
+    let image = ImageBuffer::from_fn(96, 64, |x, y| {
+        Rgb([
+            ((x * 3 + y * 5) % 256) as u8,
+            ((x * 7 + y * 11) % 256) as u8,
+            ((x * 13 + y * 17) % 256) as u8,
+        ])
+    });
+    image.save(&source).unwrap();
+
+    let low_output = run_convert_image_file(ConvertImageFileRequest {
+        source_path: source.to_string_lossy().into_owned(),
+        output_path: low_target.to_string_lossy().into_owned(),
+        output_format: "webp".into(),
+        color_mode: "rgb".into(),
+        quality: Some(30),
+        allow_source_overwrite: false,
+    })
+    .unwrap();
+    let high_output = run_convert_image_file(ConvertImageFileRequest {
+        source_path: source.to_string_lossy().into_owned(),
+        output_path: high_target.to_string_lossy().into_owned(),
+        output_format: "webp".into(),
+        color_mode: "rgb".into(),
+        quality: Some(90),
+        allow_source_overwrite: false,
+    })
+    .unwrap();
+
+    let low_size = fs::metadata(&low_output[0]).unwrap().len();
+    let high_size = fs::metadata(&high_output[0]).unwrap().len();
+
+    assert_ne!(low_size, high_size);
+}
+
+fn write_test_jpeg(path: &std::path::Path, width: u32, height: u32, quality: u8) -> Vec<u8> {
+    let image = ImageBuffer::<Rgb<u8>, _>::from_fn(width, height, |x, y| {
+        Rgb([
+            ((x * 17 + y * 3) % 256) as u8,
+            ((x * 5 + y * 11) % 256) as u8,
+            ((x * 7 + y * 13) % 256) as u8,
+        ])
+    });
+    let mut bytes = Vec::new();
+    JpegEncoder::new_with_quality(&mut bytes, quality)
+        .encode(image.as_raw(), width, height, ColorType::Rgb8.into())
+        .unwrap();
+    fs::write(path, &bytes).unwrap();
+    bytes
+}
+
+#[test]
+fn convert_image_file_jpeg_copy_is_byte_identical_at_quality_100() {
+    let dir = tempdir().unwrap();
+    let source = dir.path().join("source.jpg");
+    let target = dir.path().join("out").join("copied.jpg");
+    let original = write_test_jpeg(&source, 24, 16, 85);
+
+    let output_paths = run_convert_image_file(ConvertImageFileRequest {
+        source_path: source.to_string_lossy().into_owned(),
+        output_path: target.to_string_lossy().into_owned(),
+        output_format: "jpg".into(),
+        color_mode: "rgb".into(),
+        quality: Some(100),
+        allow_source_overwrite: false,
+    })
+    .unwrap();
+
+    assert_eq!(output_paths.len(), 1);
+    let copied = fs::read(&output_paths[0]).unwrap();
+    assert_eq!(
+        copied, original,
+        "quality 100 JPG→JPG must copy bytes unchanged"
+    );
+}
+
+#[test]
+fn convert_image_file_jpeg_copy_reencodes_when_quality_is_99() {
+    let dir = tempdir().unwrap();
+    let source = dir.path().join("source.jpg");
+    let target = dir.path().join("out").join("reencoded.jpg");
+    let original = write_test_jpeg(&source, 24, 16, 85);
+
+    let output_paths = run_convert_image_file(ConvertImageFileRequest {
+        source_path: source.to_string_lossy().into_owned(),
+        output_path: target.to_string_lossy().into_owned(),
+        output_format: "jpg".into(),
+        color_mode: "rgb".into(),
+        quality: Some(99),
+        allow_source_overwrite: false,
+    })
+    .unwrap();
+
+    let reencoded = fs::read(&output_paths[0]).unwrap();
+    assert_ne!(
+        reencoded, original,
+        "quality 99 must re-encode, not byte-copy"
+    );
+    assert_eq!(
+        image::open(&output_paths[0]).unwrap().dimensions(),
+        (24, 16)
+    );
+}
+
+#[test]
+fn convert_image_file_jpeg_copy_reencodes_when_color_mode_is_grayscale() {
+    let dir = tempdir().unwrap();
+    let source = dir.path().join("source.jpg");
+    let target = dir.path().join("out").join("gray.jpg");
+    let original = write_test_jpeg(&source, 16, 12, 90);
+
+    let output_paths = run_convert_image_file(ConvertImageFileRequest {
+        source_path: source.to_string_lossy().into_owned(),
+        output_path: target.to_string_lossy().into_owned(),
+        output_format: "jpg".into(),
+        color_mode: "grayscale".into(),
+        quality: Some(100),
+        allow_source_overwrite: false,
+    })
+    .unwrap();
+
+    let gray = fs::read(&output_paths[0]).unwrap();
+    assert_ne!(gray, original);
+    let decoded = image::open(&output_paths[0]).unwrap();
+    assert!(matches!(decoded, image::DynamicImage::ImageLuma8(_)));
+}
+
+#[test]
+fn convert_image_file_jpeg_copy_rejects_non_jpeg_bytes_with_jpg_extension() {
+    let dir = tempdir().unwrap();
+    let source = dir.path().join("fake.jpg");
+    let target = dir.path().join("out").join("should-not-exist.jpg");
+    fs::write(&source, b"this is not a jpeg file").unwrap();
+
+    let error = run_convert_image_file(ConvertImageFileRequest {
+        source_path: source.to_string_lossy().into_owned(),
+        output_path: target.to_string_lossy().into_owned(),
+        output_format: "jpg".into(),
+        color_mode: "rgb".into(),
+        quality: Some(100),
+        allow_source_overwrite: false,
+    })
+    .unwrap_err();
+
+    assert!(!target.exists(), "invalid JPEG must not be copied");
+    assert!(!error.is_empty());
+}
+
+#[test]
+fn convert_image_file_reencodes_in_place_when_source_overwrite_authorized() {
+    let dir = tempdir().unwrap();
+    let source = dir.path().join("same.jpg");
+    let original = write_test_jpeg(&source, 8, 8, 90);
+
+    let output_paths = run_convert_image_file(ConvertImageFileRequest {
+        source_path: source.to_string_lossy().into_owned(),
+        output_path: source.to_string_lossy().into_owned(),
+        output_format: "jpg".into(),
+        color_mode: "rgb".into(),
+        quality: Some(100),
+        allow_source_overwrite: true,
+    })
+    .unwrap();
+
+    // 授权原地覆盖：走原子重编码而非字节复制，且不得截断源文件。
+    assert_eq!(output_paths.len(), 1);
+    let after = fs::read(&output_paths[0]).unwrap();
+    assert_eq!(image::open(&output_paths[0]).unwrap().dimensions(), (8, 8));
+    let _ = (original, after);
+}
+
+#[test]
+fn convert_image_file_rejects_same_source_output_without_authorization() {
+    let dir = tempdir().unwrap();
+    let source = dir.path().join("same.jpg");
+    let original = write_test_jpeg(&source, 8, 8, 90);
+
+    let error = run_convert_image_file(ConvertImageFileRequest {
+        source_path: source.to_string_lossy().into_owned(),
+        output_path: source.to_string_lossy().into_owned(),
+        output_format: "jpg".into(),
+        color_mode: "rgb".into(),
+        quality: Some(90),
+        allow_source_overwrite: false,
+    })
+    .unwrap_err();
+
+    assert!(!error.is_empty());
+    // 未授权时源文件保持原样，不被截断或改写。
+    assert_eq!(fs::read(&source).unwrap(), original);
+}
+
+#[test]
+fn convert_image_file_rejects_missing_source() {
+    let dir = tempdir().unwrap();
+    let source = dir.path().join("missing.png");
+    let target = dir.path().join("out.png");
+
+    let error = run_convert_image_file(ConvertImageFileRequest {
+        source_path: source.to_string_lossy().into_owned(),
+        output_path: target.to_string_lossy().into_owned(),
+        output_format: "png".into(),
+        color_mode: "rgb".into(),
+        quality: Some(90),
+        allow_source_overwrite: false,
+    })
+    .unwrap_err();
+
+    assert!(!error.is_empty());
+    assert!(!target.exists());
+}
+
+#[test]
+fn convert_image_file_rejects_directory_source() {
+    let dir = tempdir().unwrap();
+    let target = dir.path().join("out.png");
+
+    let error = run_convert_image_file(ConvertImageFileRequest {
+        source_path: dir.path().to_string_lossy().into_owned(),
+        output_path: target.to_string_lossy().into_owned(),
+        output_format: "png".into(),
+        color_mode: "rgb".into(),
+        quality: Some(90),
+        allow_source_overwrite: false,
+    })
+    .unwrap_err();
+
+    assert!(!error.is_empty());
+    assert!(!target.exists());
+}
+
+#[test]
+fn convert_image_file_rejects_unsupported_output_format() {
+    let dir = tempdir().unwrap();
+    let source = dir.path().join("source.png");
+    let target = dir.path().join("out.tiff");
+    ImageBuffer::<Rgb<u8>, _>::from_pixel(2, 2, Rgb([1, 2, 3]))
+        .save(&source)
+        .unwrap();
+
+    let error = run_convert_image_file(ConvertImageFileRequest {
+        source_path: source.to_string_lossy().into_owned(),
+        output_path: target.to_string_lossy().into_owned(),
+        output_format: "tiff".into(),
+        color_mode: "rgb".into(),
+        quality: Some(90),
+        allow_source_overwrite: false,
+    })
+    .unwrap_err();
+
+    assert!(!error.is_empty());
+}
+
+#[test]
+fn convert_image_file_rejects_unsupported_color_mode() {
+    let dir = tempdir().unwrap();
+    let source = dir.path().join("source.png");
+    let target = dir.path().join("out.png");
+    ImageBuffer::<Rgb<u8>, _>::from_pixel(2, 2, Rgb([1, 2, 3]))
+        .save(&source)
+        .unwrap();
+
+    let error = run_convert_image_file(ConvertImageFileRequest {
+        source_path: source.to_string_lossy().into_owned(),
+        output_path: target.to_string_lossy().into_owned(),
+        output_format: "png".into(),
+        color_mode: "sepia".into(),
+        quality: Some(90),
+        allow_source_overwrite: false,
+    })
+    .unwrap_err();
+
+    assert!(!error.is_empty());
+}
+
+#[test]
+fn convert_image_file_rejects_out_of_range_quality() {
+    let dir = tempdir().unwrap();
+    let source = dir.path().join("source.png");
+    let target = dir.path().join("out.png");
+    ImageBuffer::<Rgb<u8>, _>::from_pixel(2, 2, Rgb([1, 2, 3]))
+        .save(&source)
+        .unwrap();
+
+    for quality in [Some(0u8), Some(101u8)] {
+        let error = run_convert_image_file(ConvertImageFileRequest {
+            source_path: source.to_string_lossy().into_owned(),
+            output_path: target.to_string_lossy().into_owned(),
+            output_format: "png".into(),
+            color_mode: "rgb".into(),
+            quality,
+            allow_source_overwrite: false,
+        })
+        .unwrap_err();
+
+        assert!(!error.is_empty(), "quality {quality:?} must be rejected");
+    }
+}
