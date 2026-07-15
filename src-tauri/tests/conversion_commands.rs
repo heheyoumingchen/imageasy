@@ -1,4 +1,4 @@
-use std::{fs, path::PathBuf};
+use std::{fs, path::PathBuf, sync::Mutex};
 
 use image::{codecs::jpeg::JpegEncoder, ColorType, GenericImageView, ImageBuffer, Rgb, Rgba};
 use tempfile::tempdir;
@@ -7,7 +7,13 @@ use std::path::Path;
 
 use imageasy_lib::commands::conversion::{
     convert_image_file, inspect_conversion_directory_with_counter,
-    inspect_conversion_file_with_counter, ConvertImageFileRequest, InspectConversionFileResult,
+    inspect_conversion_file_with_counter, prepare_document_render, ConvertImageFileRequest,
+    InspectConversionFileResult, RenderDocumentToImagesRequest,
+};
+use imageasy_lib::commands::pdf_rendering::BitmapOutputFormat;
+use imageasy_lib::document_renderer::coordinator::{OfficeRenderFuture, OfficeRenderer};
+use imageasy_lib::document_renderer::error::{
+    CommandError, CommandErrorCode, DocumentRendererKind,
 };
 
 /// 假 PDF 页数计数器：所有 .pdf 返回固定页数，绝不绑定真实 PDFium。
@@ -608,5 +614,165 @@ fn convert_image_file_rejects_out_of_range_quality() {
         .unwrap_err();
 
         assert!(!error.is_empty(), "quality {quality:?} must be rejected");
+    }
+}
+
+#[derive(Default)]
+struct RouteRenderer {
+    calls: Mutex<Vec<DocumentRendererKind>>,
+}
+
+impl OfficeRenderer for RouteRenderer {
+    fn render_to_pdf<'a>(
+        &'a self,
+        renderer: DocumentRendererKind,
+        _source: &'a Path,
+        requested_output: &'a Path,
+    ) -> OfficeRenderFuture<'a> {
+        Box::pin(async move {
+            self.calls.lock().unwrap().push(renderer);
+            std::fs::write(requested_output, b"%PDF-1.7\nroute-test").unwrap();
+            Ok(requested_output.to_path_buf())
+        })
+    }
+}
+
+fn document_render_request(
+    source: &Path,
+    output_directory: &Path,
+) -> RenderDocumentToImagesRequest {
+    RenderDocumentToImagesRequest {
+        source_path: source.to_string_lossy().into_owned(),
+        output_directory: output_directory.to_string_lossy().into_owned(),
+        output_format: "webp".into(),
+        color_mode: "grayscale".into(),
+        quality: 73,
+        page_numbers: vec![],
+        render_density: "high".into(),
+        naming_pattern: "source-name-index".into(),
+    }
+}
+
+#[tokio::test]
+async fn render_document_command_pdf_bypasses_helper_and_keeps_encoding_settings() {
+    let dir = tempdir().unwrap();
+    let source = dir.path().join("report.pdf");
+    std::fs::write(&source, b"%PDF-1.7\ndirect").unwrap();
+    let renderer = RouteRenderer::default();
+
+    let job = prepare_document_render(
+        document_render_request(&source, &dir.path().join("out")),
+        &renderer,
+    )
+    .await
+    .unwrap();
+
+    assert!(renderer.calls.lock().unwrap().is_empty());
+    assert_eq!(job.source_path(), source);
+    assert_eq!(job.bitmap_output_format(), BitmapOutputFormat::Luma);
+    assert_eq!(job.request().quality, 73);
+    assert_eq!(job.request().output_format, "webp");
+}
+
+#[tokio::test]
+async fn render_document_command_doc_and_docx_route_through_word() {
+    for extension in ["doc", "docx"] {
+        let dir = tempdir().unwrap();
+        let source = dir.path().join(format!("report.{extension}"));
+        std::fs::write(&source, b"office").unwrap();
+        let renderer = RouteRenderer::default();
+
+        let job = prepare_document_render(
+            document_render_request(&source, &dir.path().join("out")),
+            &renderer,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(
+            renderer.calls.lock().unwrap().as_slice(),
+            &[DocumentRendererKind::Word]
+        );
+        assert!(job.source_path().ends_with("bridge.pdf"));
+        assert!(job.source_path().exists());
+    }
+}
+
+#[tokio::test]
+async fn render_document_command_wps_uses_wps_only() {
+    let dir = tempdir().unwrap();
+    let source = dir.path().join("report.wps");
+    std::fs::write(&source, b"office").unwrap();
+    let renderer = RouteRenderer::default();
+
+    let job = prepare_document_render(
+        document_render_request(&source, &dir.path().join("out")),
+        &renderer,
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(
+        renderer.calls.lock().unwrap().as_slice(),
+        &[DocumentRendererKind::Wps]
+    );
+    assert!(job.source_path().ends_with("bridge.pdf"));
+}
+
+struct FailingRenderer(CommandError);
+
+impl OfficeRenderer for FailingRenderer {
+    fn render_to_pdf<'a>(
+        &'a self,
+        _renderer: DocumentRendererKind,
+        _source: &'a Path,
+        _requested_output: &'a Path,
+    ) -> OfficeRenderFuture<'a> {
+        Box::pin(async move { Err(self.0.clone()) })
+    }
+}
+
+#[tokio::test]
+async fn render_document_command_preserves_structured_renderer_error() {
+    let dir = tempdir().unwrap();
+    let source = dir.path().join("report.wps");
+    std::fs::write(&source, b"office").unwrap();
+    let expected = CommandError::new(
+        CommandErrorCode::WpsRendererNotAvailable,
+        "WPS 文件转图片需要 WPS Office。",
+    )
+    .with_renderer(DocumentRendererKind::Wps);
+
+    let error = prepare_document_render(
+        document_render_request(&source, &dir.path().join("out")),
+        &FailingRenderer(expected.clone()),
+    )
+    .await
+    .unwrap_err();
+
+    assert_eq!(error, expected);
+}
+
+#[tokio::test]
+async fn render_document_command_rejects_invalid_inputs_before_helper() {
+    let dir = tempdir().unwrap();
+    let source = dir.path().join("report.wps");
+    std::fs::write(&source, b"office").unwrap();
+
+    for invalid in ["format", "color", "quality", "density", "naming", "page"] {
+        let renderer = RouteRenderer::default();
+        let mut request = document_render_request(&source, &dir.path().join("out"));
+        match invalid {
+            "format" => request.output_format = "tiff".into(),
+            "color" => request.color_mode = "sepia".into(),
+            "quality" => request.quality = 0,
+            "density" => request.render_density = "ultra".into(),
+            "naming" => request.naming_pattern = "unsafe".into(),
+            "page" => request.page_numbers = vec![0],
+            _ => unreachable!(),
+        }
+
+        assert!(prepare_document_render(request, &renderer).await.is_err());
+        assert!(renderer.calls.lock().unwrap().is_empty(), "{invalid}");
     }
 }

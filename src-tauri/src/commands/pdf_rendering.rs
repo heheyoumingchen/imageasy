@@ -394,6 +394,38 @@ where
     Ok(())
 }
 
+pub fn render_pdf_document_with_callback<P, F>(
+    source_path: &Path,
+    resource_dir: Option<&Path>,
+    render_density: &str,
+    output_format: BitmapOutputFormat,
+    plan_pages: P,
+    mut on_page: F,
+) -> Result<()>
+where
+    P: FnOnce(u32) -> Result<Vec<u32>>,
+    F: FnMut(RenderedPdfPage) -> Result<()>,
+{
+    let pdfium = bind_pdfium(resource_dir)?;
+    let document = pdfium
+        .load_pdf_from_file(source_path, None)
+        .with_context(|| format!("无法渲染 PDF 文档: {}", source_path.display()))?;
+    let total_pages = document.pages().len() as u32;
+    let selected_pages = plan_pages(total_pages)?;
+    let target_width = if render_density == "high" { 2480 } else { 1240 };
+
+    for page_number in selected_pages {
+        let page_index = u16::try_from(page_number - 1).context("PDF 页码超过渲染器限制")?;
+        let page = document.pages().get(page_index)?;
+        let bitmap =
+            page.render_with_config(&PdfRenderConfig::new().set_target_width(target_width))?;
+        let image = convert_pdfium_bitmap(&bitmap, output_format)?;
+        drop(bitmap);
+        on_page(RenderedPdfPage { page_number, image })?;
+    }
+    Ok(())
+}
+
 pub fn render_pdf_pages_with_callback<F>(
     source_path: &Path,
     resource_dir: Option<&Path>,
@@ -420,31 +452,19 @@ pub fn render_pdf_pages_with_format<F>(
     page_numbers: &[u32],
     render_density: &str,
     output_format: BitmapOutputFormat,
-    mut on_page: F,
+    on_page: F,
 ) -> Result<()>
 where
     F: FnMut(RenderedPdfPage) -> Result<()>,
 {
-    let pdfium = bind_pdfium(resource_dir)?;
-    let document = pdfium
-        .load_pdf_from_file(source_path, None)
-        .with_context(|| format!("无法渲染 PDF 文档: {}", source_path.display()))?;
-
-    let total_pages = document.pages().len() as u32;
-    let selected_pages = selected_pdf_pages(total_pages, page_numbers)?;
-    let target_width = if render_density == "high" { 2480 } else { 1240 };
-
-    for page_number in selected_pages {
-        let page_index = u16::try_from(page_number - 1).context("PDF 页码超过渲染器限制")?;
-        let page = document.pages().get(page_index)?;
-        let bitmap =
-            page.render_with_config(&PdfRenderConfig::new().set_target_width(target_width))?;
-        let image = convert_pdfium_bitmap(&bitmap, output_format)?;
-        drop(bitmap);
-        on_page(RenderedPdfPage { page_number, image })?;
-    }
-
-    Ok(())
+    render_pdf_document_with_callback(
+        source_path,
+        resource_dir,
+        render_density,
+        output_format,
+        |total_pages| selected_pdf_pages(total_pages, page_numbers),
+        on_page,
+    )
 }
 
 pub fn render_pdf_pages(

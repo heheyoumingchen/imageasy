@@ -8,15 +8,20 @@ use super::{
         ImageConversionOperation, ImageConversionPlan, SourceImageInfo, SourcePixelFormat,
     },
     memory_budget::process_memory_budget,
-    pdf_rendering::{count_pdf_pages, render_pdf_pages_with_callback, RenderedPdfPage},
+    pdf_rendering::{
+        count_pdf_pages, render_pdf_document_with_callback, BitmapOutputFormat, RenderedPdfPage,
+    },
 };
+use crate::document_renderer::coordinator::{
+    prepare_document, HelperOfficeRenderer, OfficeRenderer, PreparedDocument,
+};
+use crate::document_renderer::error::{CommandError, CommandErrorCode, RendererStage};
 use anyhow::{Context, Result};
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::{
     fs,
     path::{Path, PathBuf},
-    process::Command,
 };
 use tauri::Manager;
 use walkdir::WalkDir;
@@ -72,6 +77,67 @@ pub struct RenderDocumentToImagesRequest {
     pub page_numbers: Vec<u32>,
     pub render_density: String,
     pub naming_pattern: String,
+}
+
+#[derive(Debug)]
+pub struct DocumentRenderJob {
+    request: RenderDocumentToImagesRequest,
+    prepared: PreparedDocument,
+    bitmap_output_format: BitmapOutputFormat,
+}
+
+impl DocumentRenderJob {
+    pub fn request(&self) -> &RenderDocumentToImagesRequest {
+        &self.request
+    }
+
+    pub fn source_path(&self) -> &Path {
+        self.prepared.path()
+    }
+
+    pub fn bitmap_output_format(&self) -> BitmapOutputFormat {
+        self.bitmap_output_format
+    }
+}
+
+pub async fn prepare_document_render<R: OfficeRenderer + ?Sized>(
+    request: RenderDocumentToImagesRequest,
+    renderer: &R,
+) -> std::result::Result<DocumentRenderJob, CommandError> {
+    validate_document_render_request(&request)?;
+    let source = PathBuf::from(&request.source_path);
+    let prepared = prepare_document(&source, renderer).await?;
+    let bitmap_output_format = bitmap_output_format_for_color_mode(&request.color_mode);
+    Ok(DocumentRenderJob {
+        request,
+        prepared,
+        bitmap_output_format,
+    })
+}
+
+fn bitmap_output_format_for_color_mode(color_mode: &str) -> BitmapOutputFormat {
+    match color_mode {
+        "grayscale" | "gray-cmyk" => BitmapOutputFormat::Luma,
+        _ => BitmapOutputFormat::Rgb,
+    }
+}
+
+fn estimate_document_render_memory(request: &RenderDocumentToImagesRequest) -> u64 {
+    let width = if request.render_density == "high" {
+        2_480u64
+    } else {
+        1_240u64
+    };
+    // PDFium BGRA 页 + 最终 RGB/Luma 页 + 编码工作区；每次仅处理一页。
+    let height = width.saturating_mul(3).div_ceil(2);
+    let final_channels = if matches!(request.color_mode.as_str(), "grayscale" | "gray-cmyk") {
+        1
+    } else {
+        3
+    };
+    width
+        .saturating_mul(height)
+        .saturating_mul(4 + final_channels + 1)
 }
 
 fn output_format_extension(output_format: &str) -> String {
@@ -154,6 +220,13 @@ fn plan_document_outputs(
     {
         anyhow::bail!("页码超出范围: {page_number}");
     }
+    if let Some((_, page_number)) = selected_pages
+        .iter()
+        .enumerate()
+        .find(|(index, page)| selected_pages[..*index].contains(page))
+    {
+        anyhow::bail!("重复页码: {page_number}");
+    }
     let selected_page_count = selected_pages.len();
     Ok(selected_pages
         .into_iter()
@@ -214,13 +287,27 @@ pub async fn convert_image_file(request: ConvertImageFileRequest) -> Result<Vec<
 pub async fn render_document_to_images(
     app: tauri::AppHandle,
     request: RenderDocumentToImagesRequest,
-) -> Result<Vec<String>, String> {
+) -> std::result::Result<Vec<String>, CommandError> {
     let resource_dir = app.path().resource_dir().ok();
+    let renderer = HelperOfficeRenderer::new(app);
+    let job = prepare_document_render(request, &renderer).await?;
+    let estimated_bytes = estimate_document_render_memory(&job.request);
+    let permit = process_memory_budget()
+        .acquire(estimated_bytes)
+        .await
+        .map_err(|_| {
+            CommandError::new(CommandErrorCode::InternalError, "无法获取文档转换内存许可")
+                .with_stage(RendererStage::Rasterizing)
+        })?;
     tauri::async_runtime::spawn_blocking(move || {
-        render_document_to_images_impl(request, resource_dir).map_err(|error| error.to_string())
+        let _permit = permit;
+        execute_document_render_job(job, resource_dir)
     })
     .await
-    .map_err(|error| error.to_string())?
+    .map_err(|_| {
+        CommandError::new(CommandErrorCode::InternalError, "文档转换任务异常终止")
+            .with_stage(RendererStage::Cleanup)
+    })?
 }
 
 /// PDF 走 `count_pages` 得到真实页数；Office（doc/docx/wps）返回 None，绝不探测。
@@ -423,6 +510,50 @@ const SUPPORTED_IMAGE_EXTENSIONS: [&str; 6] = ["jpg", "jpeg", "png", "webp", "bm
 const SUPPORTED_OUTPUT_FORMATS: [&str; 3] = ["jpg", "png", "webp"];
 /// 支持的色彩模式；兼容旧配置 gray-cmyk 与保留原色的 original/空串。
 const SUPPORTED_COLOR_MODES: [&str; 5] = ["rgb", "cmyk", "grayscale", "gray-cmyk", "original"];
+
+fn validate_document_render_request(
+    request: &RenderDocumentToImagesRequest,
+) -> std::result::Result<(), CommandError> {
+    let source = PathBuf::from(&request.source_path);
+    if !source.is_file() {
+        return Err(document_command_error("源文档不存在或不是文件"));
+    }
+    if !matches!(extension(&source).as_str(), "pdf" | "doc" | "docx" | "wps") {
+        return Err(document_command_error("不支持的文档格式"));
+    }
+    let output_format = normalized_format(&request.output_format);
+    if !SUPPORTED_OUTPUT_FORMATS.contains(&output_format.as_str()) {
+        return Err(document_command_error("不支持的输出格式"));
+    }
+    if !SUPPORTED_COLOR_MODES.contains(&request.color_mode.as_str()) {
+        return Err(document_command_error("不支持的色彩模式"));
+    }
+    if request.quality == 0 || request.quality > 100 {
+        return Err(document_command_error("输出质量必须在 1..=100 之间"));
+    }
+    if !matches!(request.render_density.as_str(), "standard" | "high") {
+        return Err(document_command_error("不支持的文档渲染密度"));
+    }
+    if !matches!(
+        request.naming_pattern.as_str(),
+        "source-name-index" | "source-name-date" | "source-name-original"
+    ) {
+        return Err(document_command_error("不支持的输出命名规则"));
+    }
+    if request.page_numbers.iter().any(|page| *page == 0) {
+        return Err(CommandError::new(
+            CommandErrorCode::DocumentPageRangeInvalid,
+            "页码必须为正整数",
+        )
+        .with_stage(RendererStage::Inspect));
+    }
+    Ok(())
+}
+
+fn document_command_error(message: &str) -> CommandError {
+    CommandError::new(CommandErrorCode::DocumentRendererExportFailed, message)
+        .with_stage(RendererStage::Inspect)
+}
 
 /// 后端权威校验：拒绝非法源、格式、色彩、质量。路径身份不信任前端。
 fn validate_conversion_request(
@@ -1062,89 +1193,89 @@ pub mod benchmarking {
     }
 }
 
-fn windows_soffice_candidates<F>(mut env_dir: F) -> Vec<PathBuf>
-where
-    F: FnMut(&str) -> Option<PathBuf>,
-{
-    ["ProgramFiles", "ProgramFiles(x86)"]
-        .into_iter()
-        .filter_map(|name| env_dir(name))
-        .map(|dir| dir.join("LibreOffice").join("program").join("soffice.exe"))
-        .collect()
+struct DocumentOutputTransaction<'a> {
+    request: &'a RenderDocumentToImagesRequest,
+    pending: Vec<DocumentOutputPlan>,
+    output_paths: Vec<String>,
+    created_paths: Vec<PathBuf>,
+    committed: bool,
 }
 
-fn resolve_soffice_executable_with<P, E, X>(
-    mut probe_command: P,
-    env_dir: E,
-    mut exists: X,
-) -> Result<PathBuf>
-where
-    P: FnMut(&Path) -> bool,
-    E: FnMut(&str) -> Option<PathBuf>,
-    X: FnMut(&Path) -> bool,
-{
-    let soffice = PathBuf::from("soffice");
-    if probe_command(&soffice) {
-        return Ok(soffice);
+impl<'a> DocumentOutputTransaction<'a> {
+    fn new(request: &'a RenderDocumentToImagesRequest, total_pages: u32) -> Result<Self> {
+        let output_directory = PathBuf::from(&request.output_directory);
+        fs::create_dir_all(&output_directory)
+            .with_context(|| format!("无法创建输出目录: {}", request.output_directory))?;
+        let stem = Path::new(&request.source_path)
+            .file_stem()
+            .and_then(|value| value.to_str())
+            .unwrap_or("output");
+        let pending = plan_document_outputs(
+            &output_directory,
+            stem,
+            &request.naming_pattern,
+            &request.output_format,
+            total_pages,
+            &request.page_numbers,
+        )?
+        .into_iter()
+        .filter(|plan| !plan.output_path.exists())
+        .collect::<Vec<_>>();
+        Ok(Self {
+            request,
+            output_paths: Vec::with_capacity(pending.len()),
+            created_paths: Vec::with_capacity(pending.len()),
+            pending,
+            committed: false,
+        })
     }
 
-    let candidates = windows_soffice_candidates(env_dir);
-    for candidate in &candidates {
-        if exists(candidate) && probe_command(candidate) {
-            return Ok(candidate.clone());
+    fn pending_pages(&self) -> Vec<u32> {
+        self.pending.iter().map(|plan| plan.page_number).collect()
+    }
+
+    fn write_page(&mut self, rendered_page: RenderedPdfPage) -> Result<()> {
+        let plan = self
+            .pending
+            .get(self.created_paths.len())
+            .context("PDF 渲染器返回了未规划的页面")?;
+        if rendered_page.page_number != plan.page_number {
+            anyhow::bail!(
+                "PDF 渲染页顺序不符: 期望 {}，实际 {}",
+                plan.page_number,
+                rendered_page.page_number
+            );
+        }
+        let image = apply_color_mode(rendered_page.image, &self.request.color_mode);
+        write_dynamic_image(
+            &plan.output_path,
+            &image,
+            &self.request.output_format,
+            Some(self.request.quality),
+        )?;
+        self.created_paths.push(plan.output_path.clone());
+        self.output_paths
+            .push(plan.output_path.to_string_lossy().into_owned());
+        Ok(())
+    }
+
+    fn finish(mut self) -> Vec<String> {
+        self.committed = true;
+        std::mem::take(&mut self.output_paths)
+    }
+}
+
+impl Drop for DocumentOutputTransaction<'_> {
+    fn drop(&mut self) {
+        if !self.committed {
+            for path in &self.created_paths {
+                let _ = fs::remove_file(path);
+            }
         }
     }
-
-    let mut checked = vec!["PATH: soffice".to_string()];
-    checked.extend(candidates.iter().map(|path| path.display().to_string()));
-    anyhow::bail!(
-        "DOCX_RENDERER_NOT_AVAILABLE: 未找到 LibreOffice soffice；请安装 LibreOffice 或将 soffice 加入 PATH；已检查 [{}]",
-        checked.join(", "),
-    )
-}
-
-fn soffice_executable() -> Result<PathBuf> {
-    resolve_soffice_executable_with(
-        |candidate| Command::new(candidate).arg("--version").output().is_ok(),
-        |name| std::env::var_os(name).map(PathBuf::from),
-        |candidate| candidate.exists(),
-    )
 }
 
 #[cfg(test)]
-fn resolve_soffice_executable_for_test<P, E, X>(
-    probe_command: P,
-    env_dir: E,
-    exists: X,
-) -> Result<PathBuf>
-where
-    P: FnMut(&Path) -> bool,
-    E: FnMut(&str) -> Option<PathBuf>,
-    X: FnMut(&Path) -> bool,
-{
-    resolve_soffice_executable_with(probe_command, env_dir, exists)
-}
-
-fn docx_to_pdf(source_path: &str, work_dir: &Path) -> Result<PathBuf> {
-    let soffice = soffice_executable()?;
-    let status = Command::new(&soffice)
-        .args(["--headless", "--convert-to", "pdf", "--outdir"])
-        .arg(work_dir)
-        .arg(source_path)
-        .status()
-        .context("无法启动 soffice")?;
-
-    if !status.success() {
-        anyhow::bail!("无法转换 Word 文档为 PDF");
-    }
-
-    let stem = Path::new(source_path)
-        .file_stem()
-        .and_then(|value| value.to_str())
-        .context("无法读取 Word 文件名")?;
-    Ok(work_dir.join(stem).with_extension("pdf"))
-}
-
 fn render_document_outputs_with<R>(
     request: &RenderDocumentToImagesRequest,
     total_pages: u32,
@@ -1153,90 +1284,74 @@ fn render_document_outputs_with<R>(
 where
     R: FnMut(&[u32], &mut dyn FnMut(RenderedPdfPage) -> Result<()>) -> Result<()>,
 {
-    let output_directory = PathBuf::from(&request.output_directory);
-    fs::create_dir_all(&output_directory)
-        .with_context(|| format!("无法创建输出目录: {}", request.output_directory))?;
-    let stem = Path::new(&request.source_path)
-        .file_stem()
-        .and_then(|value| value.to_str())
-        .unwrap_or("output");
-    let plans = plan_document_outputs(
-        &output_directory,
-        stem,
-        &request.naming_pattern,
-        &request.output_format,
-        total_pages,
-        &request.page_numbers,
-    )?;
-
-    // 只把尚不存在的目标交给渲染器，避免先解码大页再发现应跳过。
-    let pending = plans
-        .into_iter()
-        .filter(|plan| !plan.output_path.exists())
-        .collect::<Vec<_>>();
-    let pending_pages = pending
-        .iter()
-        .map(|plan| plan.page_number)
-        .collect::<Vec<_>>();
-    let mut output_paths = Vec::with_capacity(pending.len());
-    let mut created_paths = Vec::with_capacity(pending.len());
-    let render_result = {
-        let mut on_page = |rendered_page: RenderedPdfPage| -> Result<()> {
-            let plan = pending
-                .get(created_paths.len())
-                .context("PDF 渲染器返回了未规划的页面")?;
-            if rendered_page.page_number != plan.page_number {
-                anyhow::bail!(
-                    "PDF 渲染页顺序不符: 期望 {}，实际 {}",
-                    plan.page_number,
-                    rendered_page.page_number
-                );
-            }
-            let image = apply_color_mode(rendered_page.image, &request.color_mode);
-            write_dynamic_image(
-                &plan.output_path,
-                &image,
-                &request.output_format,
-                Some(request.quality),
-            )?;
-            created_paths.push(plan.output_path.clone());
-            output_paths.push(plan.output_path.to_string_lossy().into_owned());
-            Ok(())
-        };
-        render_pages(&pending_pages, &mut on_page)
-    };
-
-    if let Err(error) = render_result {
-        for path in &created_paths {
-            let _ = fs::remove_file(path);
-        }
-        return Err(error);
-    }
-    Ok(output_paths)
+    let mut transaction = DocumentOutputTransaction::new(request, total_pages)?;
+    let pending_pages = transaction.pending_pages();
+    render_pages(&pending_pages, &mut |page| transaction.write_page(page))?;
+    Ok(transaction.finish())
 }
 
-fn render_document_to_images_impl(
-    request: RenderDocumentToImagesRequest,
+fn execute_document_render_job(
+    job: DocumentRenderJob,
     resource_dir: Option<PathBuf>,
-) -> Result<Vec<String>> {
-    let source = PathBuf::from(&request.source_path);
-    let temp_dir = tempfile::tempdir()?;
-    let render_source = match extension(&source).as_str() {
-        "pdf" => source.clone(),
-        "docx" => docx_to_pdf(&request.source_path, temp_dir.path())?,
-        other => anyhow::bail!("不支持的文档类型: {other}"),
-    };
-    let total_pages = count_pdf_pages(&render_source, resource_dir.as_deref())?;
+) -> std::result::Result<Vec<String>, CommandError> {
+    let render_source = job.source_path().to_path_buf();
+    let output_format = job.bitmap_output_format;
+    let request = job.request;
+    let transaction = std::cell::RefCell::new(None);
 
-    render_document_outputs_with(&request, total_pages, |page_numbers, on_page| {
-        render_pdf_pages_with_callback(
+    render_pdf_document_with_callback(
+        &render_source,
+        resource_dir.as_deref(),
+        &request.render_density,
+        output_format,
+        |total_pages| {
+            let created = DocumentOutputTransaction::new(&request, total_pages)?;
+            let pages = created.pending_pages();
+            *transaction.borrow_mut() = Some(created);
+            Ok(pages)
+        },
+        |page| {
+            transaction
+                .borrow_mut()
+                .as_mut()
+                .context("PDF 输出事务尚未初始化")?
+                .write_page(page)
+        },
+    )
+    .map_err(|error| document_pipeline_error(error, RendererStage::Rasterizing, &render_source))?;
+
+    let transaction = transaction.into_inner().ok_or_else(|| {
+        document_pipeline_error(
+            anyhow::anyhow!("PDF 输出事务尚未初始化"),
+            RendererStage::Encoding,
             &render_source,
-            resource_dir.as_deref(),
-            page_numbers,
-            &request.render_density,
-            on_page,
         )
-    })
+    })?;
+    Ok(transaction.finish())
+}
+
+fn document_pipeline_error(
+    error: anyhow::Error,
+    stage: RendererStage,
+    source_path: &Path,
+) -> CommandError {
+    let raw = error.to_string();
+    let code = if raw.contains("页码") {
+        CommandErrorCode::DocumentPageRangeInvalid
+    } else {
+        CommandErrorCode::DocumentRendererExportFailed
+    };
+    let message = match code {
+        CommandErrorCode::DocumentPageRangeInvalid => "文档页码超出范围",
+        _ if stage == RendererStage::Rasterizing => "无法读取或渲染文档页面",
+        _ if stage == RendererStage::Encoding => "无法写入文档转换结果",
+        _ => "文档转换失败",
+    };
+    let source = source_path.to_string_lossy();
+    let diagnostic = raw.replace(source.as_ref(), "[path]");
+    CommandError::new(code, message)
+        .with_stage(stage)
+        .with_diagnostic(diagnostic)
 }
 
 #[cfg(test)]
@@ -1251,7 +1366,6 @@ mod tests {
 
     use super::{
         current_date_stamp, dated_name, original_name, render_document_outputs_with,
-        render_document_to_images_impl, resolve_soffice_executable_for_test,
         RenderDocumentToImagesRequest,
     };
     use crate::commands::pdf_rendering::RenderedPdfPage;
@@ -1353,6 +1467,22 @@ mod tests {
     }
 
     #[test]
+    fn document_output_naming_rejects_duplicate_pages_before_rendering() {
+        let dir = tempdir().unwrap();
+        let request = document_request(dir.path(), vec![2, 2]);
+        let mut render_called = false;
+
+        let error = render_document_outputs_with(&request, 3, |_, _| {
+            render_called = true;
+            Ok(())
+        })
+        .unwrap_err();
+
+        assert!(error.to_string().contains("重复页码"));
+        assert!(!render_called);
+    }
+
+    #[test]
     fn document_output_naming_filters_existing_outputs_before_rendering() {
         let dir = tempdir().unwrap();
         let request = document_request(dir.path(), vec![]);
@@ -1367,6 +1497,24 @@ mod tests {
         })
         .unwrap();
         assert_eq!(output.len(), 2);
+        assert_eq!(fs::read(existing).unwrap(), b"preexisting");
+    }
+
+    #[test]
+    fn document_output_naming_skips_rendering_when_every_output_exists() {
+        let dir = tempdir().unwrap();
+        let request = document_request(dir.path(), vec![1]);
+        let existing = dir.path().join("out").join("report.png");
+        fs::create_dir_all(existing.parent().unwrap()).unwrap();
+        fs::write(&existing, b"preexisting").unwrap();
+
+        let output = render_document_outputs_with(&request, 3, |pages, _| {
+            assert!(pages.is_empty());
+            Ok(())
+        })
+        .unwrap();
+
+        assert!(output.is_empty());
         assert_eq!(fs::read(existing).unwrap(), b"preexisting");
     }
 
@@ -1387,141 +1535,6 @@ mod tests {
         assert!(error.to_string().contains("page 3 failed"));
         assert!(!dir.path().join("out").join("report-001.png").exists());
         assert_eq!(fs::read(existing).unwrap(), b"preexisting");
-    }
-
-    #[test]
-    fn resolve_soffice_uses_path_command_when_available() {
-        let resolved = resolve_soffice_executable_for_test(|_| true, |_| None, |_| false).unwrap();
-
-        assert_eq!(resolved, PathBuf::from("soffice"));
-    }
-
-    #[test]
-    fn resolve_soffice_checks_windows_libreoffice_locations() {
-        let expected = PathBuf::from("C:/Program Files")
-            .join("LibreOffice")
-            .join("program")
-            .join("soffice.exe");
-        let resolved = resolve_soffice_executable_for_test(
-            |path| path == expected,
-            |name| match name {
-                "ProgramFiles" => Some(PathBuf::from("C:/Program Files")),
-                "ProgramFiles(x86)" => Some(PathBuf::from("C:/Program Files (x86)")),
-                _ => None,
-            },
-            |path| path == expected,
-        )
-        .unwrap();
-
-        assert_eq!(resolved, expected);
-    }
-
-    #[test]
-    fn resolve_soffice_reports_checked_locations_when_unavailable() {
-        let error = resolve_soffice_executable_for_test(
-            |_| false,
-            |name| match name {
-                "ProgramFiles" => Some(PathBuf::from("C:/Program Files")),
-                _ => None,
-            },
-            |_| false,
-        )
-        .unwrap_err()
-        .to_string();
-
-        let expected = PathBuf::from("C:/Program Files")
-            .join("LibreOffice")
-            .join("program")
-            .join("soffice.exe");
-
-        assert!(error.contains("DOCX_RENDERER_NOT_AVAILABLE"));
-        assert!(error.contains("soffice"));
-        assert!(error.contains(&expected.display().to_string()));
-    }
-
-    #[test]
-    fn render_document_to_images_rejects_missing_docx_runtime_with_clear_error() {
-        let dir = tempdir().unwrap();
-        let source = dir.path().join("demo.docx");
-        fs::write(&source, b"fake-docx").unwrap();
-
-        let error = render_document_to_images_impl(
-            RenderDocumentToImagesRequest {
-                source_path: source.to_string_lossy().into_owned(),
-                output_directory: dir.path().join("out").to_string_lossy().into_owned(),
-                output_format: "jpg".into(),
-                color_mode: "rgb".into(),
-                quality: 90,
-                page_numbers: vec![1],
-                render_density: "standard".into(),
-                naming_pattern: "source-name-index".into(),
-            },
-            None,
-        )
-        .unwrap_err();
-
-        assert!(error.to_string().contains("DOCX_RENDERER_NOT_AVAILABLE"));
-    }
-
-    #[test]
-    fn render_document_to_images_reports_attempted_pdfium_locations() {
-        let dir = tempdir().unwrap();
-        let source = dir.path().join("demo.pdf");
-        fs::write(
-            &source,
-            b"%PDF-1.4\n1 0 obj\n<<>>\nendobj\ntrailer\n<<>>\n%%EOF",
-        )
-        .unwrap();
-
-        let error = render_document_to_images_impl(
-            RenderDocumentToImagesRequest {
-                source_path: source.to_string_lossy().into_owned(),
-                output_directory: dir.path().join("out").to_string_lossy().into_owned(),
-                output_format: "jpg".into(),
-                color_mode: "rgb".into(),
-                quality: 90,
-                page_numbers: vec![1],
-                render_density: "standard".into(),
-                naming_pattern: "source-name-index".into(),
-            },
-            None,
-        )
-        .unwrap_err();
-
-        let error = error.to_string();
-        assert!(error.contains("PDF_RENDERER_NOT_AVAILABLE"));
-        assert!(error.contains("尝试位置") || error.contains("attempted"));
-    }
-
-    #[test]
-    fn render_document_to_images_rejects_missing_pdf_runtime_with_clear_error() {
-        let dir = tempdir().unwrap();
-        let source = dir.path().join("demo.pdf");
-        fs::write(
-            &source,
-            b"%PDF-1.4\n1 0 obj\n<<>>\nendobj\ntrailer\n<<>>\n%%EOF",
-        )
-        .unwrap();
-
-        let error = render_document_to_images_impl(
-            RenderDocumentToImagesRequest {
-                source_path: source.to_string_lossy().into_owned(),
-                output_directory: dir.path().join("out").to_string_lossy().into_owned(),
-                output_format: "jpg".into(),
-                color_mode: "rgb".into(),
-                quality: 90,
-                page_numbers: vec![1],
-                render_density: "standard".into(),
-                naming_pattern: "source-name-index".into(),
-            },
-            None,
-        )
-        .unwrap_err();
-
-        let error = error.to_string();
-        assert!(
-            error.contains("PDF_RENDERER_NOT_AVAILABLE") || error.contains("无法渲染 PDF 文档")
-        );
     }
 
     #[test]

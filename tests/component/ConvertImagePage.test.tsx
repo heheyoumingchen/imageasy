@@ -338,6 +338,50 @@ describe('ConvertImagePage', () => {
     expect(await screen.findByText('PNG / 灰度 / 全部页')).toBeInTheDocument();
   });
 
+  it('shows an unknown page count for Office documents imported without probing Office', async () => {
+    const user = userEvent.setup();
+    setConversionSettings({ outputFormat: 'jpg', colorMode: 'rgb' });
+    vi.mocked(openConversionFiles).mockResolvedValue(['F:/demo/report.docx']);
+    vi.mocked(inspectConversionFile).mockResolvedValue({
+      kind: 'document',
+      sourcePath: 'F:/demo/report.docx',
+      sourceName: 'report.docx',
+      imageMetadata: null,
+      documentMetadata: { pageCount: null, extension: 'docx' },
+      errorMessage: null
+    });
+
+    render(<ConvertImagePage />);
+    await user.click(screen.getByRole('button', { name: '添加文件' }));
+
+    expect(await screen.findByText('JPG / RGB / 页数未知')).toBeInTheDocument();
+    expect(screen.getByLabelText('文件类型 DOCX')).toBeInTheDocument();
+  });
+
+  it('sends an empty page list for all-pages document conversion so the backend expands it', async () => {
+    const user = userEvent.setup();
+    setConversionSettings({ outputFormat: 'jpg', colorMode: 'rgb' });
+    vi.mocked(openConversionFiles).mockResolvedValue(['F:/demo/b.pdf']);
+    vi.mocked(inspectConversionFile).mockResolvedValue({
+      kind: 'document',
+      sourcePath: 'F:/demo/b.pdf',
+      sourceName: 'b.pdf',
+      imageMetadata: null,
+      documentMetadata: { pageCount: 3, extension: 'pdf' },
+      errorMessage: null
+    });
+    vi.mocked(renderDocumentToImages).mockResolvedValue(['F:/demo/b-001.jpg']);
+
+    render(<ConvertImagePage />);
+    await user.click(screen.getByRole('button', { name: '添加文件' }));
+    await screen.findByText('b.pdf');
+    await user.click(screen.getByRole('button', { name: '开始转换' }));
+
+    await waitFor(() => {
+      expect(renderDocumentToImages).toHaveBeenCalledWith(expect.objectContaining({ pageNumbers: [] }));
+    });
+  });
+
   it('uses a stem-based output name and settings-store format for image conversion', async () => {
     const user = userEvent.setup();
     setConversionSettings({ outputFormat: 'png' });
@@ -356,8 +400,74 @@ describe('ConvertImagePage', () => {
         outputPath: 'F:/demo/a-001.png',
         outputFormat: 'png',
         colorMode: 'rgb',
-        quality: 100
+        quality: 100,
+        allowSourceOverwrite: false
       });
+    });
+  });
+
+  it('authorizes source overwrite only after the batch confirmation is accepted', async () => {
+    const user = userEvent.setup();
+    setConversionSettings({ outputFormat: 'jpg', namingPattern: 'source-name-original' });
+    vi.mocked(openConversionFiles).mockResolvedValue(['F:/demo/a.jpg']);
+    vi.mocked(inspectConversionFile).mockResolvedValue(inspectedJpgFile);
+    vi.mocked(convertImageFile).mockResolvedValue(['F:/demo/a.jpg']);
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true);
+
+    render(<ConvertImagePage />);
+    await user.click(screen.getByRole('button', { name: '添加文件' }));
+    await screen.findByText('a.jpg');
+    await user.click(screen.getByRole('button', { name: '开始转换' }));
+
+    await waitFor(() => {
+      expect(convertImageFile).toHaveBeenCalledWith(
+        expect.objectContaining({ sourcePath: 'F:/demo/a.jpg', allowSourceOverwrite: true })
+      );
+    });
+    confirmSpy.mockRestore();
+  });
+
+  it('sends no conversion invoke when the source-overwrite confirmation is cancelled', async () => {
+    const user = userEvent.setup();
+    setConversionSettings({ outputFormat: 'jpg', namingPattern: 'source-name-original' });
+    vi.mocked(openConversionFiles).mockResolvedValue(['F:/demo/a.jpg']);
+    vi.mocked(inspectConversionFile).mockResolvedValue(inspectedJpgFile);
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false);
+
+    render(<ConvertImagePage />);
+    await user.click(screen.getByRole('button', { name: '添加文件' }));
+    await screen.findByText('a.jpg');
+    await user.click(screen.getByRole('button', { name: '开始转换' }));
+
+    expect(confirmSpy).toHaveBeenCalledTimes(1);
+    expect(convertImageFile).not.toHaveBeenCalled();
+    confirmSpy.mockRestore();
+  });
+
+  it('passes settings-store quality to document conversion requests', async () => {
+    const user = userEvent.setup();
+    setConversionSettings({ outputFormat: 'webp', quality: 100 });
+    vi.mocked(openConversionFiles).mockResolvedValue(['F:/demo/b.pdf']);
+    vi.mocked(inspectConversionFile).mockResolvedValue({
+      kind: 'document',
+      sourcePath: 'F:/demo/b.pdf',
+      sourceName: 'b.pdf',
+      imageMetadata: null,
+      documentMetadata: { pageCount: 2, extension: 'pdf' },
+      errorMessage: null
+    });
+    vi.mocked(renderDocumentToImages).mockResolvedValue(['F:/demo/b-001.webp', 'F:/demo/b-002.webp']);
+
+    render(<ConvertImagePage />);
+    await user.click(screen.getByRole('button', { name: '添加文件' }));
+    await screen.findByText('b.pdf');
+    await user.click(screen.getByRole('button', { name: '开始转换' }));
+
+    await waitFor(() => {
+      expect(renderDocumentToImages).toHaveBeenCalledWith(expect.objectContaining({
+        outputFormat: 'webp',
+        quality: 100
+      }));
     });
   });
 
@@ -517,6 +627,36 @@ describe('ConvertImagePage', () => {
     expect(screen.getByText('失败')).toBeInTheDocument();
   });
 
+  it('shows document renderer errors inline on the document item', async () => {
+    const user = userEvent.setup();
+
+    vi.mocked(openConversionFiles).mockResolvedValue(['F:/demo/report.docx']);
+    vi.mocked(inspectConversionFile).mockResolvedValue({
+      kind: 'document',
+      sourcePath: 'F:/demo/report.docx',
+      sourceName: 'report.docx',
+      imageMetadata: null,
+      documentMetadata: { pageCount: 1, extension: 'docx' },
+      errorMessage: null
+    });
+    vi.mocked(renderDocumentToImages).mockRejectedValue({
+      code: 'WORD_RENDERER_NOT_AVAILABLE',
+      message: 'DOC/DOCX 转图片需要 Microsoft Word 或 WPS Office。PDF 转图片不受影响。',
+      stage: 'launch'
+    });
+
+    render(<ConvertImagePage />);
+
+    await user.click(screen.getByRole('button', { name: '添加文件' }));
+    await screen.findByText('report.docx');
+    await user.click(screen.getByRole('button', { name: '开始转换' }));
+
+    expect(
+      await screen.findByText('DOC/DOCX 转图片需要 Microsoft Word 或 WPS Office。PDF 转图片不受影响。')
+    ).toBeInTheDocument();
+    expect(screen.getByText('失败')).toBeInTheDocument();
+  });
+
   it('runs ready items with the configured batch concurrency', async () => {
     const user = userEvent.setup();
     let inFlight = 0;
@@ -649,7 +789,8 @@ describe('ConvertImagePage', () => {
       outputPath: 'F:/demo/b-001.png',
       outputFormat: 'png',
       colorMode: 'cmyk',
-      quality: 100
+      quality: 100,
+      allowSourceOverwrite: false
     });
   });
 
@@ -717,6 +858,7 @@ describe('ConvertImagePage', () => {
       outputDirectory: 'F:/demo',
       outputFormat: 'jpg',
       colorMode: 'rgb',
+      quality: 100,
       pageNumbers: [1, 3],
       renderDensity: 'standard',
       namingPattern: 'source-name-index'
