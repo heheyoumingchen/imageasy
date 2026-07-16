@@ -5,11 +5,15 @@ use image::{GenericImageView, ImageBuffer, Rgba};
 use tempfile::tempdir;
 
 use imageasy_lib::commands::editor::{
-    open_image_session, generate_editor_thumbnail, generate_image_preview, prefetch_image_preview, save_image_as_jpg, commit_crop_to_working_image,
-    AdjustmentParams, CommitCropRequest, CropRect, GenerateImagePreviewRequest, PrefetchImagePreviewRequest, SaveImageAsJpgRequest,
+    commit_crop_to_working_image, generate_editor_thumbnail, generate_image_preview,
+    open_image_session, prefetch_image_preview, save_image_as_jpg, AdjustmentParams,
+    CommitCropRequest, CropRect, GenerateImagePreviewRequest, PrefetchImagePreviewRequest,
+    SaveImageAsJpgRequest,
 };
 
-fn run_open_image_session(path: String) -> Result<imageasy_lib::commands::editor::OpenImageSessionResult, String> {
+fn run_open_image_session(
+    path: String,
+) -> Result<imageasy_lib::commands::editor::OpenImageSessionResult, String> {
     tauri::async_runtime::block_on(open_image_session(path))
 }
 
@@ -17,7 +21,9 @@ fn run_generate_editor_thumbnail(path: String) -> Result<String, String> {
     tauri::async_runtime::block_on(generate_editor_thumbnail(path))
 }
 
-fn run_generate_image_preview(request: GenerateImagePreviewRequest) -> Result<imageasy_lib::commands::editor::GenerateImagePreviewResult, String> {
+fn run_generate_image_preview(
+    request: GenerateImagePreviewRequest,
+) -> Result<imageasy_lib::commands::editor::GenerateImagePreviewResult, String> {
     tauri::async_runtime::block_on(generate_image_preview(request))
 }
 
@@ -99,7 +105,11 @@ fn generate_image_preview_returns_preview_file_path() {
 
     assert!(preview.data_url.is_some(), "调整预览应返回 data_url");
     assert!(preview.preview_path.is_none(), "调整预览不应写磁盘");
-    assert!(preview.data_url.as_ref().unwrap().starts_with("data:image/jpeg;base64,"));
+    assert!(preview
+        .data_url
+        .as_ref()
+        .unwrap()
+        .starts_with("data:image/jpeg;base64,"));
     assert!(preview.width > 0);
     assert!(preview.height > 0);
 }
@@ -192,7 +202,10 @@ fn save_image_as_jpg_writes_target_file() {
     .unwrap();
 
     let output_path = PathBuf::from(result.saved_path);
-    assert_eq!(output_path.file_name().unwrap().to_string_lossy(), "demo_output.jpg");
+    assert_eq!(
+        output_path.file_name().unwrap().to_string_lossy(),
+        "demo_output.jpg"
+    );
     assert!(output_path.exists());
     assert!(result.size_bytes > 0);
 }
@@ -230,8 +243,12 @@ fn warm_filter_changes_preview_pixels() {
     let neutral_image = image::open(neutral.preview_path.as_ref().unwrap()).unwrap();
     let warm_data_url = warm.data_url.as_ref().unwrap();
     assert!(warm_data_url.starts_with("data:image/jpeg;base64,"));
-    let warm_base64 = warm_data_url.strip_prefix("data:image/jpeg;base64,").unwrap();
-    let warm_bytes = base64::engine::general_purpose::STANDARD.decode(warm_base64).unwrap();
+    let warm_base64 = warm_data_url
+        .strip_prefix("data:image/jpeg;base64,")
+        .unwrap();
+    let warm_bytes = base64::engine::general_purpose::STANDARD
+        .decode(warm_base64)
+        .unwrap();
     let warm_image = image::load_from_memory(&warm_bytes).unwrap();
 
     let neutral_pixel = neutral_image.get_pixel(0, 0).0;
@@ -273,11 +290,18 @@ fn temperature_and_tint_change_preview_pixels() {
     // neutral 是默认预览（磁盘），adjusted 是调整预览（base64）
     let neutral_image = image::open(neutral.preview_path.as_ref().unwrap()).unwrap();
     let adjusted_data_url = adjusted.data_url.as_ref().unwrap();
-    let adjusted_base64 = adjusted_data_url.strip_prefix("data:image/jpeg;base64,").unwrap();
-    let adjusted_bytes = base64::engine::general_purpose::STANDARD.decode(adjusted_base64).unwrap();
+    let adjusted_base64 = adjusted_data_url
+        .strip_prefix("data:image/jpeg;base64,")
+        .unwrap();
+    let adjusted_bytes = base64::engine::general_purpose::STANDARD
+        .decode(adjusted_base64)
+        .unwrap();
     let adjusted_image = image::load_from_memory(&adjusted_bytes).unwrap();
 
-    assert_ne!(adjusted_image.get_pixel(0, 0).0, neutral_image.get_pixel(0, 0).0);
+    assert_ne!(
+        adjusted_image.get_pixel(0, 0).0,
+        neutral_image.get_pixel(0, 0).0
+    );
 }
 
 #[test]
@@ -308,7 +332,6 @@ fn grayscale_filter_changes_saved_output_pixels() {
     assert_eq!(pixel[0], pixel[1]);
     assert_eq!(pixel[1], pixel[2]);
 }
-
 
 #[test]
 fn sepia_filter_changes_preview_pixels() {
@@ -342,11 +365,18 @@ fn sepia_filter_changes_preview_pixels() {
     // neutral 是默认预览（磁盘），sepia 是调整预览（base64）
     let neutral_image = image::open(neutral.preview_path.as_ref().unwrap()).unwrap();
     let sepia_data_url = sepia.data_url.as_ref().unwrap();
-    let sepia_base64 = sepia_data_url.strip_prefix("data:image/jpeg;base64,").unwrap();
-    let sepia_bytes = base64::engine::general_purpose::STANDARD.decode(sepia_base64).unwrap();
+    let sepia_base64 = sepia_data_url
+        .strip_prefix("data:image/jpeg;base64,")
+        .unwrap();
+    let sepia_bytes = base64::engine::general_purpose::STANDARD
+        .decode(sepia_base64)
+        .unwrap();
     let sepia_image = image::load_from_memory(&sepia_bytes).unwrap();
 
-    assert_ne!(sepia_image.get_pixel(0, 0).0, neutral_image.get_pixel(0, 0).0);
+    assert_ne!(
+        sepia_image.get_pixel(0, 0).0,
+        neutral_image.get_pixel(0, 0).0
+    );
 }
 
 #[test]
@@ -495,9 +525,7 @@ fn commit_crop_uses_a_stable_working_directory_even_for_existing_working_images(
     .unwrap();
 
     let output_path = PathBuf::from(&result.working_image.path);
-    let expected_working_dir = std::env::temp_dir()
-        .join("imageasy")
-        .join("editor-work");
+    let expected_working_dir = std::env::temp_dir().join("imageasy").join("editor-work");
 
     assert_eq!(output_path.parent(), Some(expected_working_dir.as_path()));
     assert!(output_path.exists());

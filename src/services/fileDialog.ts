@@ -4,7 +4,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { splitSourcePaths, type SourceSelection } from '../utils/paths';
 
 const imageFilters = [{ name: 'Images', extensions: ['jpg', 'jpeg', 'png', 'webp', 'bmp'] }];
-const conversionFilters = [{ name: 'Supported files', extensions: ['jpg', 'jpeg', 'png', 'webp', 'bmp', 'gif', 'pdf', 'docx'] }];
+const conversionFilters = [{ name: 'Supported files', extensions: ['jpg', 'jpeg', 'png', 'webp', 'bmp', 'gif', 'pdf', 'docx', 'doc', 'wps'] }];
 const extractionFilters = [{ name: 'Documents', extensions: ['pdf', 'doc', 'docx', 'ppt', 'pptx'] }];
 const splittingFilters = [{ name: 'Images and PDF', extensions: ['jpg', 'jpeg', 'png', 'webp', 'bmp', 'gif', 'pdf'] }];
 const stitchingFilters = [{ name: 'Images', extensions: ['jpg', 'jpeg', 'png', 'webp', 'bmp', 'gif'] }];

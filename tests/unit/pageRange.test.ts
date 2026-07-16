@@ -10,9 +10,19 @@ describe('pageRange', () => {
     expect(expandPageRange('1-3,5,8-10', 12)).toEqual([1, 2, 3, 5, 8, 9, 10]);
   });
 
-  it('rejects invalid or out-of-bounds ranges', () => {
+  it('expands syntax without an upper bound when the page count is unknown', () => {
+    expect(expandPageRange('1-3,5')).toEqual([1, 2, 3, 5]);
+  });
+
+  it('rejects invalid ranges regardless of the optional upper bound', () => {
+    expect(() => expandPageRange('0,2')).toThrow('页码必须从 1 开始');
+    expect(() => expandPageRange('3-1')).toThrow('页码范围必须按升序填写');
+  });
+
+  it('rejects out-of-bounds ranges only when the page count is known', () => {
     expect(() => expandPageRange('3-1', 12)).toThrow('页码范围必须按升序填写');
     expect(() => expandPageRange('1-3,20', 12)).toThrow('页码超出文档总页数');
     expect(() => expandPageRange('0', 12)).toThrow('页码必须从 1 开始');
+    expect(() => expandPageRange('13', 12)).toThrow('页码超出文档总页数');
   });
 });

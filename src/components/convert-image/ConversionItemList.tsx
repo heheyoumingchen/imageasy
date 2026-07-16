@@ -28,6 +28,9 @@ const statusClassMap = {
 const badgeClassByExtension: Record<string, string> = {
   psd: 'bg-[#274F8F]',
   pdf: 'bg-[#FF6B61]',
+  docx: 'bg-[#2B579A]',
+  doc: 'bg-[#2B579A]',
+  wps: 'bg-[#F0771D]',
   jpg: 'bg-[#22C55E]',
   jpeg: 'bg-[#22C55E]',
   png: 'bg-[#FFB95F]',

@@ -1,7 +1,8 @@
 export const normalizePageRangeInput = (value: string) =>
   value.replace(/\s+/g, '').replace(/,+/g, ',').replace(/-+/g, '-').replace(/^,|,$/g, '');
 
-export const expandPageRange = (value: string, maxPage: number) => {
+// maxPage 可选：Office 文档导入时页数未知，仅校验语法与下界，上界推迟到后端已知页数时再校验。
+export const expandPageRange = (value: string, maxPage?: number) => {
   const normalized = normalizePageRangeInput(value);
 
   if (!normalized) {
@@ -28,7 +29,7 @@ export const expandPageRange = (value: string, maxPage: number) => {
     throw new Error('页码必须从 1 开始');
   }
 
-  if (pages.some((page) => page > maxPage)) {
+  if (maxPage !== undefined && pages.some((page) => page > maxPage)) {
     throw new Error('页码超出文档总页数');
   }
 

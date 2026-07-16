@@ -8,6 +8,7 @@ vi.mock('@tauri-apps/api/core', () => ({
 
 import { getAppCacheUsage, clearAppCache } from '../../src/services/cacheCommands';
 import { openImageSession, generateEditorThumbnail, generateImagePreview, prefetchImagePreview, saveImageAsJpg, commitCropToWorkingImage } from '../../src/services/editorCommands';
+import { inspectConversionFile, inspectConversionDirectory, convertImageFile, renderDocumentToImages } from '../../src/services/conversionCommands';
 import { inspectExtractionDocument, inspectExtractionDirectory, extractDocumentImages } from '../../src/services/extractionCommands';
 import { inspectDownloadSource, saveDownloadImages } from '../../src/services/imageDownloadCommands';
 import { inspectSplittingFile, inspectSplittingDirectory, splitImageFile } from '../../src/services/splittingCommands';
@@ -47,6 +48,70 @@ describe('service layer invoke contracts', () => {
     const cropReq = { sourcePath: '/a.png', rotation: 0 as const, crop: { x: 0, y: 0, width: 100, height: 100 } };
     await commitCropToWorkingImage(cropReq);
     expect(mockInvoke).toHaveBeenCalledWith('commit_crop_to_working_image', { request: cropReq });
+  });
+
+  it('conversionCommands passes path and request correctly', async () => {
+    mockInvoke.mockResolvedValue([]);
+
+    await inspectConversionFile('F:/demo/a.jpg');
+    expect(mockInvoke).toHaveBeenCalledWith('inspect_conversion_file', { path: 'F:/demo/a.jpg' });
+
+    await inspectConversionDirectory('F:/demo');
+    expect(mockInvoke).toHaveBeenCalledWith('inspect_conversion_directory', { path: 'F:/demo' });
+
+    const convertReq = {
+      sourcePath: 'F:/demo/a.jpg',
+      outputPath: 'F:/out/a-001.png',
+      outputFormat: 'png' as const,
+      colorMode: 'rgb' as const,
+      quality: 90,
+      allowSourceOverwrite: false
+    };
+    await convertImageFile(convertReq);
+    expect(mockInvoke).toHaveBeenCalledWith('convert_image_file', { request: convertReq });
+
+    const renderReq = {
+      sourcePath: 'F:/demo/b.pdf',
+      outputDirectory: 'F:/out',
+      outputFormat: 'jpg' as const,
+      colorMode: 'rgb' as const,
+      quality: 90,
+      pageNumbers: [1, 2],
+      renderDensity: 'standard' as const,
+      namingPattern: 'source-name-index' as const
+    };
+    await renderDocumentToImages(renderReq);
+    expect(mockInvoke).toHaveBeenCalledWith('render_document_to_images', { request: renderReq });
+  });
+
+  it('conversionCommands normalizes object-shaped Tauri rejections without [object Object]', async () => {
+    mockInvoke.mockRejectedValueOnce({
+      code: 'WORD_RENDERER_NOT_AVAILABLE',
+      message: '未检测到 Word',
+      diagnostic: 'CoCreateInstance 失败',
+      stage: 'applicationStart',
+      rendererKind: 'word'
+    });
+
+    const error = await renderDocumentToImages({
+      sourcePath: 'F:/demo/report.docx',
+      outputDirectory: 'F:/out',
+      outputFormat: 'jpg',
+      colorMode: 'rgb',
+      quality: 90,
+      pageNumbers: [],
+      renderDensity: 'standard',
+      namingPattern: 'source-name-index'
+    }).catch((caught: unknown) => caught);
+
+    expect(error).toBeInstanceOf(Error);
+    const normalized = error as Error & { code?: string; diagnostic?: string; rendererKind?: string };
+    expect(normalized.message).toBe('未检测到 Word');
+    expect(normalized.message).not.toContain('[object Object]');
+    expect(normalized.code).toBe('WORD_RENDERER_NOT_AVAILABLE');
+    expect(normalized.rendererKind).toBe('word');
+    // diagnostic 由后端保证有界且不含源路径；前端仅透传。
+    expect(normalized.diagnostic).toBe('CoCreateInstance 失败');
   });
 
   it('extractionCommands passes path and request correctly', async () => {
@@ -99,7 +164,29 @@ describe('service layer invoke contracts', () => {
   });
 
   it('stitchingCommands passes path and request correctly', async () => {
-    mockInvoke.mockResolvedValue({ outputPath: '/out/a-stitch-001.jpg', stitchedCount: 2 });
+    const fileResult = {
+      kind: 'image' as const,
+      sourcePath: '/demo/a.png',
+      sourceName: 'a.png',
+      imageMetadata: { width: 10, height: 10, extension: 'png' },
+      thumbnail: null,
+      errorMessage: null
+    };
+    const directoryResults = [
+      {
+        kind: 'image' as const,
+        sourcePath: '/demo/b.png',
+        sourceName: 'b.png',
+        imageMetadata: { width: 20, height: 20, extension: 'png' },
+        thumbnail: null,
+        errorMessage: null
+      }
+    ];
+    const stitchResult = { outputPath: '/out/a-stitch-001.jpg', stitchedCount: 2 };
+    mockInvoke
+      .mockResolvedValueOnce(fileResult)
+      .mockResolvedValueOnce(directoryResults)
+      .mockResolvedValueOnce(stitchResult);
 
     await inspectStitchingFile('/demo/a.png');
     expect(mockInvoke).toHaveBeenCalledWith('inspect_stitching_file', { path: '/demo/a.png' });

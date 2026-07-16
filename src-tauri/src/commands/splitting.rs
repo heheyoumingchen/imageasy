@@ -1,5 +1,7 @@
 use super::{
-    common::{apply_color_mode, current_date_stamp, extension, normalized_format, write_dynamic_image},
+    common::{
+        apply_color_mode, current_date_stamp, extension, normalized_format, write_dynamic_image,
+    },
     pdf_rendering::render_pdf_pages_with_callback,
 };
 use anyhow::{Context, Result};
@@ -73,7 +75,9 @@ pub async fn inspect_splitting_file(path: String) -> Result<InspectSplittingFile
 }
 
 #[tauri::command]
-pub async fn inspect_splitting_directory(path: String) -> Result<Vec<InspectSplittingFileResult>, String> {
+pub async fn inspect_splitting_directory(
+    path: String,
+) -> Result<Vec<InspectSplittingFileResult>, String> {
     tauri::async_runtime::spawn_blocking(move || {
         inspect_splitting_directory_impl(&path).map_err(|error| error.to_string())
     })
@@ -82,7 +86,10 @@ pub async fn inspect_splitting_directory(path: String) -> Result<Vec<InspectSpli
 }
 
 #[tauri::command]
-pub async fn split_image_file(app: tauri::AppHandle, request: SplitImageFileRequest) -> Result<SplitImageFileResult, String> {
+pub async fn split_image_file(
+    app: tauri::AppHandle,
+    request: SplitImageFileRequest,
+) -> Result<SplitImageFileResult, String> {
     let resource_dir = app.path().resource_dir().ok();
     tauri::async_runtime::spawn_blocking(move || {
         split_image_file_impl(request, resource_dir).map_err(|error| error.to_string())
@@ -113,7 +120,10 @@ fn stem(path: &Path) -> String {
 }
 
 fn is_supported_image(path: &Path) -> bool {
-    matches!(extension(path).as_str(), "jpg" | "jpeg" | "png" | "webp" | "bmp" | "gif")
+    matches!(
+        extension(path).as_str(),
+        "jpg" | "jpeg" | "png" | "webp" | "bmp" | "gif"
+    )
 }
 
 fn is_supported_source(path: &Path) -> bool {
@@ -121,7 +131,8 @@ fn is_supported_source(path: &Path) -> bool {
 }
 
 fn pdf_page_count(path: &Path) -> Result<u32> {
-    let document = LoDocument::load(path).with_context(|| format!("无法读取 PDF 文档: {}", path.display()))?;
+    let document =
+        LoDocument::load(path).with_context(|| format!("无法读取 PDF 文档: {}", path.display()))?;
     Ok(document.get_pages().len() as u32)
 }
 
@@ -138,7 +149,11 @@ fn inspect_splitting_file_impl(path: &str) -> Result<InspectSplittingFileResult>
             kind: "image".into(),
             source_path: path.into(),
             source_name,
-            image_metadata: Some(SplittingImageMetadata { width, height, extension: ext }),
+            image_metadata: Some(SplittingImageMetadata {
+                width,
+                height,
+                extension: ext,
+            }),
             pdf_metadata: None,
             error_message: None,
         });
@@ -150,7 +165,10 @@ fn inspect_splitting_file_impl(path: &str) -> Result<InspectSplittingFileResult>
             source_path: path.into(),
             source_name,
             image_metadata: None,
-            pdf_metadata: Some(SplittingPdfMetadata { page_count: pdf_page_count(&source)?, extension: ext }),
+            pdf_metadata: Some(SplittingPdfMetadata {
+                page_count: pdf_page_count(&source)?,
+                extension: ext,
+            }),
             error_message: None,
         });
     }
@@ -196,7 +214,13 @@ fn output_format_extension(output_format: &str) -> String {
 fn output_file_name(stem: &str, naming_pattern: &str, output_format: &str, index: u32) -> String {
     let output_format = output_format_extension(output_format);
     match naming_pattern {
-        "source-name-date" => format!("{}-{}-{:03}.{}", stem, current_date_stamp(), index, output_format),
+        "source-name-date" => format!(
+            "{}-{}-{:03}.{}",
+            stem,
+            current_date_stamp(),
+            index,
+            output_format
+        ),
         _ => format!("{}-{:03}.{}", stem, index, output_format),
     }
 }
@@ -211,7 +235,10 @@ fn validate_request(request: &SplitImageFileRequest) -> Result<()> {
     if request.columns == 1 && request.rows == 1 {
         anyhow::bail!("至少需要分割为 2 个部分");
     }
-    if !matches!(normalized_format(&request.output_format).as_str(), "jpg" | "png" | "webp") {
+    if !matches!(
+        normalized_format(&request.output_format).as_str(),
+        "jpg" | "png" | "webp"
+    ) {
         anyhow::bail!("不支持的输出格式: {}", request.output_format);
     }
     Ok(())
@@ -228,10 +255,18 @@ fn split_grid(image: &DynamicImage, columns: u32, rows: u32) -> Result<Vec<Dynam
     let mut outputs = Vec::new();
     for row in 0..rows {
         let y = row * base_height;
-        let segment_height = if row == rows - 1 { height - y } else { base_height };
+        let segment_height = if row == rows - 1 {
+            height - y
+        } else {
+            base_height
+        };
         for column in 0..columns {
             let x = column * base_width;
-            let segment_width = if column == columns - 1 { width - x } else { base_width };
+            let segment_width = if column == columns - 1 {
+                width - x
+            } else {
+                base_width
+            };
             outputs.push(image.crop_imm(x, y, segment_width, segment_height));
         }
     }
@@ -262,7 +297,12 @@ fn write_split_outputs(
             continue;
         }
         let split = apply_color_mode(split, &request.color_mode);
-        write_dynamic_image(&output_path, &split, &request.output_format, Some(request.quality))?;
+        write_dynamic_image(
+            &output_path,
+            &split,
+            &request.output_format,
+            Some(request.quality),
+        )?;
         *written_count += 1;
         if include_output_paths {
             output_paths.push(output_path.to_string_lossy().into_owned());
@@ -271,7 +311,10 @@ fn write_split_outputs(
     Ok(())
 }
 
-fn split_image_file_impl(request: SplitImageFileRequest, resource_dir: Option<PathBuf>) -> Result<SplitImageFileResult> {
+fn split_image_file_impl(
+    request: SplitImageFileRequest,
+    resource_dir: Option<PathBuf>,
+) -> Result<SplitImageFileResult> {
     validate_request(&request)?;
 
     let source = PathBuf::from(&request.source_path);
@@ -287,7 +330,8 @@ fn split_image_file_impl(request: SplitImageFileRequest, resource_dir: Option<Pa
     let mut next_index = 1;
 
     if is_supported_image(&source) {
-        let image = image::open(&source).with_context(|| format!("无法打开图片: {}", source.display()))?;
+        let image =
+            image::open(&source).with_context(|| format!("无法打开图片: {}", source.display()))?;
         write_split_outputs(
             &source_stem,
             &output_directory,
@@ -301,20 +345,26 @@ fn split_image_file_impl(request: SplitImageFileRequest, resource_dir: Option<Pa
         )?;
     } else if extension(&source) == "pdf" {
         let mut rendered_count = 0;
-        render_pdf_pages_with_callback(&source, resource_dir.as_deref(), &[], "standard", |rendered_page| {
-            rendered_count += 1;
-            write_split_outputs(
-                &source_stem,
-                &output_directory,
-                &request,
-                &rendered_page.image,
-                &mut next_index,
-                &mut written_count,
-                &mut output_paths,
-                &mut skipped_count,
-                include_output_paths,
-            )
-        })?;
+        render_pdf_pages_with_callback(
+            &source,
+            resource_dir.as_deref(),
+            &[],
+            "standard",
+            |rendered_page| {
+                rendered_count += 1;
+                write_split_outputs(
+                    &source_stem,
+                    &output_directory,
+                    &request,
+                    &rendered_page.image,
+                    &mut next_index,
+                    &mut written_count,
+                    &mut output_paths,
+                    &mut skipped_count,
+                    include_output_paths,
+                )
+            },
+        )?;
         if rendered_count == 0 {
             anyhow::bail!("PDF 没有可分割页面");
         }

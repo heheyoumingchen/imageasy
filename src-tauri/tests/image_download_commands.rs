@@ -1,7 +1,8 @@
 use imageasy_lib::commands::image_download::{
-    apply_image_response_metadata, build_safe_output_name, infer_download_extension, infer_format_from_source,
-    inspect_download_source_from_html, metadata_event_payload_for, metadata_probe_candidates_for,
-    parse_wechat_article_images, parse_webpage_images, thumbnail_cache_key_for, thumbnail_cache_path_for,
+    apply_image_response_metadata, build_safe_output_name, infer_download_extension,
+    infer_format_from_source, inspect_download_source_from_html, metadata_event_payload_for,
+    metadata_probe_candidates_for, parse_webpage_images, parse_wechat_article_images,
+    thumbnail_cache_key_for, thumbnail_cache_path_for,
 };
 
 #[test]
@@ -43,14 +44,16 @@ fn inspect_download_source_rejects_invalid_url() {
 
 #[test]
 fn inspect_download_source_rejects_invalid_mode() {
-    let result = inspect_download_source_from_html("unknown", "https://example.com", "<html></html>");
+    let result =
+        inspect_download_source_from_html("unknown", "https://example.com", "<html></html>");
     assert!(result.is_err());
     assert!(result.unwrap_err().to_string().contains("不支持的下载模式"));
 }
 
 #[test]
 fn inspect_download_source_rejects_http_url() {
-    let result = inspect_download_source_from_html("webpage", "http://example.com/post", "<html></html>");
+    let result =
+        inspect_download_source_from_html("webpage", "http://example.com/post", "<html></html>");
 
     assert!(result.is_err());
     assert!(result.unwrap_err().to_string().contains("公开 HTTPS"));
@@ -58,7 +61,8 @@ fn inspect_download_source_rejects_http_url() {
 
 #[test]
 fn inspect_download_source_rejects_localhost_https_url() {
-    let result = inspect_download_source_from_html("webpage", "https://localhost/post", "<html></html>");
+    let result =
+        inspect_download_source_from_html("webpage", "https://localhost/post", "<html></html>");
 
     assert!(result.is_err());
     assert!(result.unwrap_err().to_string().contains("公开 HTTPS"));
@@ -66,7 +70,8 @@ fn inspect_download_source_rejects_localhost_https_url() {
 
 #[test]
 fn inspect_download_source_rejects_private_ip_https_url() {
-    let result = inspect_download_source_from_html("webpage", "https://192.168.1.10/post", "<html></html>");
+    let result =
+        inspect_download_source_from_html("webpage", "https://192.168.1.10/post", "<html></html>");
 
     assert!(result.is_err());
     assert!(result.unwrap_err().to_string().contains("公开 HTTPS"));
@@ -74,7 +79,11 @@ fn inspect_download_source_rejects_private_ip_https_url() {
 
 #[test]
 fn inspect_download_source_rejects_ipv4_mapped_ipv6_private_url() {
-    let result = inspect_download_source_from_html("webpage", "https://[::ffff:192.168.1.10]/post", "<html></html>");
+    let result = inspect_download_source_from_html(
+        "webpage",
+        "https://[::ffff:192.168.1.10]/post",
+        "<html></html>",
+    );
 
     assert!(result.is_err());
     assert!(result.unwrap_err().to_string().contains("公开 HTTPS"));
@@ -108,13 +117,20 @@ fn parse_webpage_images_reads_script_json_urls_and_titles() {
 
     let images = parse_webpage_images("https://example.com/post", html).unwrap();
 
-    assert!(images.iter().any(|item| item.source_url == "https://example.com/cover.jpg" && item.title == "封面图"));
-    assert!(images.iter().any(|item| item.source_url == "https://example.com/static/news.png"));
+    assert!(images
+        .iter()
+        .any(|item| item.source_url == "https://example.com/cover.jpg" && item.title == "封面图"));
+    assert!(images
+        .iter()
+        .any(|item| item.source_url == "https://example.com/static/news.png"));
 }
 
 #[test]
 fn infer_download_format_from_source_name() {
-    assert_eq!(infer_format_from_source("https://example.com/a.webp"), Some("webp".to_string()));
+    assert_eq!(
+        infer_format_from_source("https://example.com/a.webp"),
+        Some("webp".to_string())
+    );
     assert_eq!(infer_format_from_source("https://example.com/a"), None);
 }
 
@@ -128,7 +144,9 @@ fn parse_webpage_images_reads_escaped_script_image_urls() {
 
     let images = parse_webpage_images("https://www.36kr.com/", html).unwrap();
 
-    assert!(images.iter().any(|item| item.source_url.starts_with("https://img.36krcdn.com/photo/2026/demo.jpeg")));
+    assert!(images.iter().any(|item| item
+        .source_url
+        .starts_with("https://img.36krcdn.com/photo/2026/demo.jpeg")));
 }
 
 #[test]
@@ -141,7 +159,9 @@ fn parse_webpage_images_reads_protocol_relative_script_image_urls() {
 
     let images = parse_webpage_images("https://example.com/post", html).unwrap();
 
-    assert!(images.iter().any(|item| item.source_url == "https://cdn.example.com/path/cover.png"));
+    assert!(images
+        .iter()
+        .any(|item| item.source_url == "https://cdn.example.com/path/cover.png"));
 }
 
 #[test]
@@ -276,7 +296,8 @@ fn metadata_probe_candidates_are_limited_to_first_120_items() {
         .map(|index| format!(r#"<img src="https://example.com/{index}.jpg" />"#))
         .collect::<Vec<_>>()
         .join("\n");
-    let result = inspect_download_source_from_html("webpage", "https://example.com/post", &html).unwrap();
+    let result =
+        inspect_download_source_from_html("webpage", "https://example.com/post", &html).unwrap();
 
     let candidates = metadata_probe_candidates_for(&result.images);
 
@@ -323,12 +344,18 @@ fn build_safe_output_name_trims_windows_trailing_dot_and_space() {
 #[test]
 fn build_safe_output_name_avoids_windows_reserved_device_names() {
     assert_eq!(build_safe_output_name("CON.png", "png", 1), "image-001.png");
-    assert_eq!(build_safe_output_name("lpt9.jpg", "jpg", 2), "image-002.jpg");
+    assert_eq!(
+        build_safe_output_name("lpt9.jpg", "jpg", 2),
+        "image-002.jpg"
+    );
 }
 
 #[test]
 fn build_safe_output_name_avoids_reserved_device_name_prefixes() {
-    assert_eq!(build_safe_output_name("CON.foo.jpg", "jpg", 1), "image-001.jpg");
+    assert_eq!(
+        build_safe_output_name("CON.foo.jpg", "jpg", 1),
+        "image-001.jpg"
+    );
 }
 
 #[test]
@@ -362,21 +389,32 @@ fn parse_webpage_images_skips_empty_src() {
 
 #[test]
 fn infer_download_extension_uses_content_type() {
-    assert_eq!(infer_download_extension(Some("image/png"), &[], "photo.jpg"), "png");
+    assert_eq!(
+        infer_download_extension(Some("image/png"), &[], "photo.jpg"),
+        "png"
+    );
     assert_eq!(infer_download_extension(Some("image/jpeg"), &[], ""), "jpg");
-    assert_eq!(infer_download_extension(Some("image/webp; charset=utf-8"), &[], ""), "webp");
+    assert_eq!(
+        infer_download_extension(Some("image/webp; charset=utf-8"), &[], ""),
+        "webp"
+    );
 }
 
 #[test]
 fn infer_download_extension_uses_bytes_without_content_type() {
     let png_header = [0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A];
 
-    assert_eq!(infer_download_extension(None, &png_header, "unknown"), "png");
+    assert_eq!(
+        infer_download_extension(None, &png_header, "unknown"),
+        "png"
+    );
 }
 
 #[test]
 fn infer_download_extension_falls_back_to_source_name() {
-    assert_eq!(infer_download_extension(None, &[0x00], "photo.webp"), "webp");
+    assert_eq!(
+        infer_download_extension(None, &[0x00], "photo.webp"),
+        "webp"
+    );
     assert_eq!(infer_download_extension(None, &[0x00], "noext"), "bin");
 }
-

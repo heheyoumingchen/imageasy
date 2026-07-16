@@ -12,6 +12,7 @@ import {
   chooseJpgSavePath,
   chooseOutputDirectory,
   openDirectoryInSystem,
+  openConversionSources,
   openSplittingSources,
   openStitchingSources
 } from '../../src/services/fileDialog';
@@ -48,6 +49,20 @@ describe('fileDialog service', () => {
     mockInvoke.mockResolvedValue(undefined);
     await openDirectoryInSystem('/some/path');
     expect(mockInvoke).toHaveBeenCalledWith('open_directory_in_system', { path: '/some/path' });
+  });
+
+  it('openConversionSources accepts image and Office/PDF document sources', async () => {
+    mockOpen.mockResolvedValue(['/demo/a.jpg', '/demo/report.docx', '/demo/legacy.wps']);
+
+    const result = await openConversionSources();
+
+    expect(result).toEqual({ files: ['/demo/a.jpg', '/demo/report.docx', '/demo/legacy.wps'], directories: [], cancelled: false });
+    expect(mockOpen).toHaveBeenCalledWith(expect.objectContaining({
+      directory: false,
+      multiple: true,
+      recursive: true,
+      filters: [{ name: 'Supported files', extensions: ['jpg', 'jpeg', 'png', 'webp', 'bmp', 'gif', 'pdf', 'docx', 'doc', 'wps'] }]
+    }));
   });
 
   it('openSplittingSources accepts image and PDF sources', async () => {

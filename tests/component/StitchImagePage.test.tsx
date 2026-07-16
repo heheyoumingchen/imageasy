@@ -114,7 +114,7 @@ describe('StitchImagePage', () => {
     expect(preview).not.toHaveClass('object-contain');
   });
 
-  it('shows the complete image while editing a stitching cell', async () => {
+  it('keeps cover fit while editing a stitching cell', async () => {
     vi.mocked(fileDialog.openStitchingSources).mockResolvedValue({
       files: ['/test/tall.jpg'], directories: [], cancelled: false,
     });
@@ -135,8 +135,9 @@ describe('StitchImagePage', () => {
 
     await user.click(screen.getByRole('button', { name: '编辑' }));
 
-    expect(preview).toHaveClass('object-contain');
-    expect(preview).not.toHaveClass('object-cover');
+    expect(preview).toHaveClass('absolute');
+    expect(preview).not.toHaveClass('object-contain');
+    expect(preview).toHaveStyle({ width: '100%', height: 'auto', maxHeight: 'none' });
   });
 
   it('fills layout cells after selected file inspections finish', async () => {
@@ -227,7 +228,81 @@ describe('StitchImagePage', () => {
       }));
     });
     expect(fileDialog.chooseOutputDirectory).not.toHaveBeenCalled();
-    expect(await screen.findByText('已导出：/test/output/a-stitch-001.jpg')).toBeInTheDocument();
+    expect(screen.queryByText(/^已导出：/)).not.toBeInTheDocument();
+  });
+
+  it('keeps the output directory button disabled before a successful export', () => {
+    render(<StitchImagePage />);
+
+    expect(screen.getByRole('button', { name: '打开输出目录' })).toBeDisabled();
+  });
+
+  it('opens the parent directory returned by the stitching backend', async () => {
+    getSettingsStore().setState({
+      outputDirectoryStrategy: 'custom',
+      defaultOutputDirectory: '/configured/output',
+    });
+    vi.mocked(fileDialog.openStitchingSources).mockResolvedValue({
+      files: ['/test/a.jpg', '/test/b.jpg'], directories: [], cancelled: false,
+    });
+    vi.mocked(stitchingCommands.inspectStitchingFile).mockImplementation(async (path: string) =>
+      createMockInspection({ sourcePath: path, sourceName: path.endsWith('a.jpg') ? 'a.jpg' : 'b.jpg' })
+    );
+    vi.mocked(stitchingCommands.stitchImageFiles).mockResolvedValue({
+      outputPath: '/actual/output/a-stitch-001.jpg', stitchedCount: 2,
+    });
+
+    render(<StitchImagePage />);
+    await user.click(screen.getByRole('button', { name: '添加图片' }));
+    expect(await screen.findByAltText('a.jpg')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: '下载' }));
+    await user.click(await screen.findByRole('button', { name: '打开输出目录' }));
+
+    expect(fileDialog.openDirectoryInSystem).toHaveBeenCalledWith('/actual/output');
+  });
+
+  it('keeps the last successful output directory after a later export fails', async () => {
+    vi.mocked(fileDialog.openStitchingSources).mockResolvedValue({
+      files: ['/test/a.jpg', '/test/b.jpg'], directories: [], cancelled: false,
+    });
+    vi.mocked(stitchingCommands.inspectStitchingFile).mockImplementation(async (path: string) =>
+      createMockInspection({ sourcePath: path, sourceName: path.endsWith('a.jpg') ? 'a.jpg' : 'b.jpg' })
+    );
+    vi.mocked(stitchingCommands.stitchImageFiles)
+      .mockResolvedValueOnce({ outputPath: '/first/output/a-stitch-001.jpg', stitchedCount: 2 })
+      .mockRejectedValueOnce(new Error('第二次导出失败'));
+
+    render(<StitchImagePage />);
+    await user.click(screen.getByRole('button', { name: '添加图片' }));
+    expect(await screen.findByAltText('a.jpg')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: '下载' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: '下载' })).toBeEnabled());
+    await user.click(screen.getByRole('button', { name: '下载' }));
+    expect(await screen.findByText('第二次导出失败')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: '打开输出目录' }));
+
+    expect(fileDialog.openDirectoryInSystem).toHaveBeenCalledWith('/first/output');
+  });
+
+  it('shows a readable error when opening the output directory fails', async () => {
+    vi.mocked(fileDialog.openStitchingSources).mockResolvedValue({
+      files: ['/test/a.jpg', '/test/b.jpg'], directories: [], cancelled: false,
+    });
+    vi.mocked(stitchingCommands.inspectStitchingFile).mockImplementation(async (path: string) =>
+      createMockInspection({ sourcePath: path, sourceName: path.endsWith('a.jpg') ? 'a.jpg' : 'b.jpg' })
+    );
+    vi.mocked(stitchingCommands.stitchImageFiles).mockResolvedValue({
+      outputPath: '/actual/output/a-stitch-001.jpg', stitchedCount: 2,
+    });
+    vi.mocked(fileDialog.openDirectoryInSystem).mockRejectedValue(new Error('无法打开目录'));
+
+    render(<StitchImagePage />);
+    await user.click(screen.getByRole('button', { name: '添加图片' }));
+    expect(await screen.findByAltText('a.jpg')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: '下载' }));
+    await user.click(await screen.findByRole('button', { name: '打开输出目录' }));
+
+    expect(await screen.findByText('无法打开目录')).toBeInTheDocument();
   });
 
   it('swaps images between layout cells by dragging one cell onto another', async () => {

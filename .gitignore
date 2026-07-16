@@ -11,5 +11,9 @@ src-tauri/pdfium/
 green-package/
 设计稿/pdfium_x86-64.zip
 
+# 转换基准素材与报告（可复现，不入库）
+src-tauri/target/conversion-bench-fixtures/
+src-tauri/target/conversion-benchmark.json
+
 # Claude worktrees（内嵌 git 仓库）
 .claude/worktrees/

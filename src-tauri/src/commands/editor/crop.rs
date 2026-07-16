@@ -14,7 +14,9 @@ use super::{
 static WORKING_IMAGE_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 #[tauri::command]
-pub fn commit_crop_to_working_image(request: CommitCropRequest) -> Result<CommitCropResult, String> {
+pub fn commit_crop_to_working_image(
+    request: CommitCropRequest,
+) -> Result<CommitCropResult, String> {
     commit_crop_to_working_image_impl(request).map_err(|error| error.to_string())
 }
 

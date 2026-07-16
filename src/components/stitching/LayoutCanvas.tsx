@@ -31,10 +31,15 @@ const SCALE_STEP = 0.2;
 const SCALE_MIN = 1;
 const SCALE_MAX = 6;
 
-// 普通预览用 cover 铺满方格；编辑模式切换为 contain，让用户先看到完整图片再拖动/缩放构图。
-// offset 以方格尺寸的比例平移（translate% 相对元素自身尺寸，与后端 offset*target 一致），scale 在当前适配基础上继续缩放。
+// 预览模式用 object-cover 铺满方格（overflow-hidden 裁切）。
+// 编辑模式不用 object-cover（它在 img 内部裁切无法平移），改用绝对定位 + cover 尺寸，overflow-hidden 裁切溢出，
+// 用户通过拖拽 translate 将隐藏部分移入可视区域。
 const previewTransform = (image: StitchingCanvasImage) =>
   `translate(${image.offsetX * 100}%, ${image.offsetY * 100}%) scale(${image.scale})`;
+
+// 编辑模式 transform：先居中，再叠加用户偏移和缩放
+const editingTransform = (image: StitchingCanvasImage) =>
+  `translate(-50%, -50%) translate(${image.offsetX * 100}%, ${image.offsetY * 100}%) scale(${image.scale})`;
 
 // 拖拽平移状态：记录起点与起始 offset，以及方格像素尺寸用于换算比例。
 type PanState = {
@@ -180,6 +185,12 @@ const LayoutCanvas = ({
             const image = images[index];
             const isEditing = editingIndex === index;
 
+            // 编辑模式 cover 方向：比较图片宽高比和方格宽高比，决定哪个方向铺满
+            const cellAspect = (cell.colSpan / template.cols) / (cell.rowSpan / template.rows) * aspectRatio;
+            const imgAspect = image?.metadata ? image.metadata.width / image.metadata.height : 1;
+            // 图片比方格更宽 → 高度100%铺满、宽度溢出；图片比方格更高 → 宽度100%铺满、高度溢出
+            const coverFitH = imgAspect > cellAspect;
+
             return (
               <div
                 key={index}
@@ -203,13 +214,32 @@ const LayoutCanvas = ({
                 {image ? (
                   <>
                     {image.preview ? (
-                      <img
-                        src={image.preview}
-                        alt={image.name}
-                        draggable={false}
-                        className={`w-full h-full ${isEditing ? 'object-contain' : 'object-cover'} transition-transform duration-75 select-none`}
-                        style={{ transform: previewTransform(image) }}
-                      />
+                      isEditing ? (
+                        /* 编辑模式：绝对定位 cover 尺寸，overflow-hidden 裁切，拖拽可平移查看隐藏区域 */
+                        <img
+                          src={image.preview}
+                          alt={image.name}
+                          draggable={false}
+                          className="absolute select-none transition-transform duration-75"
+                          style={{
+                            top: '50%',
+                            left: '50%',
+                            transform: editingTransform(image),
+                            ...(coverFitH
+                              ? { height: '100%', width: 'auto', maxWidth: 'none' }
+                              : { width: '100%', height: 'auto', maxHeight: 'none' }
+                            ),
+                          }}
+                        />
+                      ) : (
+                        <img
+                          src={image.preview}
+                          alt={image.name}
+                          draggable={false}
+                          className="w-full h-full object-cover transition-transform duration-75 select-none"
+                          style={{ transform: previewTransform(image) }}
+                        />
+                      )
                     ) : (
                       <div className="w-full h-full flex items-center justify-center bg-[#F3F4F8]">
                         <span className="text-xs text-[#8C93A1] font-medium truncate px-2">

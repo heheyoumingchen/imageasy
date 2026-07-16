@@ -1,8 +1,10 @@
-use super::common::{apply_color_mode, current_date_stamp, extension, normalized_format, write_dynamic_image};
+use super::common::{
+    apply_color_mode, current_date_stamp, extension, normalized_format, write_dynamic_image,
+};
 use anyhow::{Context, Result};
 use base64::{engine::general_purpose::STANDARD, Engine as _};
 use image::codecs::jpeg::JpegEncoder;
-use image::imageops::{self, FilterType};
+use image::imageops::FilterType;
 use image::{DynamicImage, ImageBuffer, Rgb, Rgba};
 use jpeg_decoder::Decoder as JpegDecoder;
 use rayon::prelude::*;
@@ -13,6 +15,9 @@ use std::{
     path::{Path, PathBuf},
 };
 use walkdir::WalkDir;
+
+mod geometry;
+mod image_pipeline;
 
 const MAX_OUTPUT_PIXELS: u64 = 100_000_000;
 
@@ -80,7 +85,12 @@ fn simple_hash(input: &str) -> u64 {
 /// 生成缩略图缓存文件名（基于源文件路径 + mtime + size）
 fn stitching_thumbnail_cache_key(path: &Path) -> Option<String> {
     let metadata = fs::metadata(path).ok()?;
-    let mtime = metadata.modified().ok()?.duration_since(std::time::UNIX_EPOCH).ok()?.as_secs();
+    let mtime = metadata
+        .modified()
+        .ok()?
+        .duration_since(std::time::UNIX_EPOCH)
+        .ok()?
+        .as_secs();
     let size = metadata.len();
     let path_str = path.to_string_lossy();
     let hash = simple_hash(&format!("{path_str}_{mtime}_{size}"));
@@ -90,18 +100,21 @@ fn stitching_thumbnail_cache_key(path: &Path) -> Option<String> {
 
 /// JPEG 缩略图快速解码：利用 DCT 缩放因子直接产出小图
 fn fast_decode_jpeg_thumbnail_stitching(path: &Path, size: u32) -> Result<DynamicImage> {
-    let file = fs::File::open(path)
-        .with_context(|| format!("无法打开 JPEG: {}", path.display()))?;
+    let file =
+        fs::File::open(path).with_context(|| format!("无法打开 JPEG: {}", path.display()))?;
     let mut decoder = JpegDecoder::new(BufReader::new(file));
 
-    decoder.read_info()
+    decoder
+        .read_info()
         .with_context(|| format!("无法读取 JPEG 头部: {}", path.display()))?;
 
     let scale = size.min(u16::MAX as u32) as u16;
-    decoder.scale(scale, scale)
+    decoder
+        .scale(scale, scale)
         .with_context(|| format!("无法设置 JPEG 缩放: {}", path.display()))?;
 
-    let pixels = decoder.decode()
+    let pixels = decoder
+        .decode()
         .with_context(|| format!("JPEG 解码失败: {}", path.display()))?;
 
     let info = decoder.info().context("解码后信息不可用")?;
@@ -119,8 +132,8 @@ fn fast_decode_jpeg_thumbnail_stitching(path: &Path, size: u32) -> Result<Dynami
             DynamicImage::ImageLuma8(buffer)
         }
         _ => {
-            let image = image::open(path)
-                .with_context(|| format!("无法打开图片: {}", path.display()))?;
+            let image =
+                image::open(path).with_context(|| format!("无法打开图片: {}", path.display()))?;
             image.resize(size, size, FilterType::CatmullRom)
         }
     };
@@ -145,7 +158,8 @@ fn create_stitching_thumbnail_data_url(path: &Path) -> Result<String> {
     }
 
     // JPEG 使用快速解码，非 JPEG 使用完整解码
-    let extension = path.extension()
+    let extension = path
+        .extension()
         .and_then(|e| e.to_str())
         .unwrap_or("")
         .to_ascii_lowercase();
@@ -153,8 +167,8 @@ fn create_stitching_thumbnail_data_url(path: &Path) -> Result<String> {
     let thumbnail = if matches!(extension.as_str(), "jpg" | "jpeg") {
         fast_decode_jpeg_thumbnail_stitching(path, 360)?
     } else {
-        let image = image::open(path)
-            .with_context(|| format!("无法生成拼接缩略图: {}", path.display()))?;
+        let image =
+            image::open(path).with_context(|| format!("无法生成拼接缩略图: {}", path.display()))?;
         image.resize(360, 360, FilterType::CatmullRom)
     };
 
@@ -185,7 +199,11 @@ fn inspect_image_metadata(path: &Path, source_name: String) -> Result<InspectSti
         kind: "image".into(),
         source_path: path.to_string_lossy().into_owned(),
         source_name,
-        image_metadata: Some(StitchingImageMetadata { width: dimensions.0, height: dimensions.1, extension: extension(path) }),
+        image_metadata: Some(StitchingImageMetadata {
+            width: dimensions.0,
+            height: dimensions.1,
+            extension: extension(path),
+        }),
         // 禁止用 Tauri asset URL 直接预览本地图片；导入阶段返回小尺寸 data URL 缩略图。
         thumbnail: Some(create_stitching_thumbnail_data_url(path)?),
         error_message: None,
@@ -228,7 +246,9 @@ pub async fn inspect_stitching_file(path: String) -> Result<InspectStitchingFile
 }
 
 #[tauri::command]
-pub async fn inspect_stitching_directory(path: String) -> Result<Vec<InspectStitchingFileResult>, String> {
+pub async fn inspect_stitching_directory(
+    path: String,
+) -> Result<Vec<InspectStitchingFileResult>, String> {
     tauri::async_runtime::spawn_blocking(move || {
         inspect_stitching_directory_impl(&path).map_err(|error| error.to_string())
     })
@@ -237,8 +257,14 @@ pub async fn inspect_stitching_directory(path: String) -> Result<Vec<InspectStit
 }
 
 #[tauri::command]
-pub fn stitch_image_files(request: StitchImageFilesRequest) -> Result<StitchImageFilesResult, String> {
-    stitch_image_files_impl(request).map_err(|error| error.to_string())
+pub async fn stitch_image_files(
+    request: StitchImageFilesRequest,
+) -> Result<StitchImageFilesResult, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        stitch_image_files_impl(request).map_err(|error| error.to_string())
+    })
+    .await
+    .map_err(|error| error.to_string())?
 }
 
 fn source_name(path: &Path, fallback: &str) -> String {
@@ -256,7 +282,10 @@ fn stem(path: &Path) -> String {
 }
 
 fn is_supported_image(path: &Path) -> bool {
-    matches!(extension(path).as_str(), "jpg" | "jpeg" | "png" | "webp" | "bmp" | "gif")
+    matches!(
+        extension(path).as_str(),
+        "jpg" | "jpeg" | "png" | "webp" | "bmp" | "gif"
+    )
 }
 
 fn inspect_stitching_file_impl(path: &str) -> Result<InspectStitchingFileResult> {
@@ -331,15 +360,34 @@ fn canvas_dimensions(canvas_ratio: &str, resolution: u32) -> Result<(u32, u32)> 
     }
 }
 
-fn layout_rect(request: &StitchImageFilesRequest, cell: &StitchLayoutCell, canvas_width: u32, canvas_height: u32) -> Result<Rect> {
-    if cell.row_span == 0 || cell.col_span == 0 || cell.row >= request.rows || cell.col >= request.cols || cell.row + cell.row_span > request.rows || cell.col + cell.col_span > request.cols {
+fn layout_rect(
+    request: &StitchImageFilesRequest,
+    cell: &StitchLayoutCell,
+    canvas_width: u32,
+    canvas_height: u32,
+) -> Result<Rect> {
+    if cell.row_span == 0
+        || cell.col_span == 0
+        || cell.row >= request.rows
+        || cell.col >= request.cols
+        || cell.row + cell.row_span > request.rows
+        || cell.col + cell.col_span > request.cols
+    {
         anyhow::bail!("布局单元格超出画布范围");
     }
 
-    let available_width = canvas_width.checked_sub(request.padding * 2).context("边距过大")?;
-    let available_height = canvas_height.checked_sub(request.padding * 2).context("边距过大")?;
-    let total_spacing_width = request.spacing.saturating_mul(request.cols.saturating_sub(1));
-    let total_spacing_height = request.spacing.saturating_mul(request.rows.saturating_sub(1));
+    let available_width = canvas_width
+        .checked_sub(request.padding * 2)
+        .context("边距过大")?;
+    let available_height = canvas_height
+        .checked_sub(request.padding * 2)
+        .context("边距过大")?;
+    let total_spacing_width = request
+        .spacing
+        .saturating_mul(request.cols.saturating_sub(1));
+    let total_spacing_height = request
+        .spacing
+        .saturating_mul(request.rows.saturating_sub(1));
     if available_width <= total_spacing_width || available_height <= total_spacing_height {
         anyhow::bail!("边距或间距过大");
     }
@@ -348,8 +396,10 @@ fn layout_rect(request: &StitchImageFilesRequest, cell: &StitchLayoutCell, canva
     let cell_height = (available_height - total_spacing_height) as f64 / request.rows as f64;
     let x = request.padding as f64 + cell.col as f64 * (cell_width + request.spacing as f64);
     let y = request.padding as f64 + cell.row as f64 * (cell_height + request.spacing as f64);
-    let width = cell.col_span as f64 * cell_width + cell.col_span.saturating_sub(1) as f64 * request.spacing as f64;
-    let height = cell.row_span as f64 * cell_height + cell.row_span.saturating_sub(1) as f64 * request.spacing as f64;
+    let width = cell.col_span as f64 * cell_width
+        + cell.col_span.saturating_sub(1) as f64 * request.spacing as f64;
+    let height = cell.row_span as f64 * cell_height
+        + cell.row_span.saturating_sub(1) as f64 * request.spacing as f64;
 
     Ok(Rect {
         x: x.round() as u32,
@@ -359,39 +409,15 @@ fn layout_rect(request: &StitchImageFilesRequest, cell: &StitchLayoutCell, canva
     })
 }
 
-fn inside_rounded_rect(x: u32, y: u32, width: u32, height: u32, radius: u32) -> bool {
-    let radius = radius.min(width / 2).min(height / 2);
-    if radius == 0 {
-        return true;
-    }
-    let x = x as i64;
-    let y = y as i64;
-    let width = width as i64;
-    let height = height as i64;
-    let radius = radius as i64;
-
-    let corner = |cx: i64, cy: i64| {
-        let dx = x - cx;
-        let dy = y - cy;
-        dx * dx + dy * dy <= radius * radius
-    };
-
-    if x < radius && y < radius {
-        corner(radius, radius)
-    } else if x >= width - radius && y < radius {
-        corner(width - radius - 1, radius)
-    } else if x < radius && y >= height - radius {
-        corner(radius, height - radius - 1)
-    } else if x >= width - radius && y >= height - radius {
-        corner(width - radius - 1, height - radius - 1)
-    } else {
-        true
-    }
-}
-
 // 将 cover 后的粘贴偏移夹紧，使缩放后的图片始终完整覆盖方格，避免拖动到边缘时露出透明白边。
 // resized_size 恒 >= target_size（cover 保证），因此合法粘贴范围是 [target_size - resized_size, 0]。
-fn clamp_cover_paste_offset(center: f32, requested_offset: f32, target_size: u32, resized_size: u32) -> i64 {
+#[cfg(test)]
+fn clamp_cover_paste_offset(
+    center: f32,
+    requested_offset: f32,
+    target_size: u32,
+    resized_size: u32,
+) -> i64 {
     let raw = center + requested_offset * target_size as f32;
     let min = target_size as i64 - resized_size as i64;
     let max = 0i64;
@@ -402,6 +428,7 @@ fn clamp_cover_paste_offset(center: f32, requested_offset: f32, target_size: u32
 // 默认 scale=1 时图片等比缩放使短边贴合方格，长边超出方格并被 tile 边界隐藏。
 // 示例：原图 50x150，方格 25x25 → 缩放为 25x75（宽度贴合，高度上下超出并隐藏）。
 // scale>1 进一步放大；offset_x/offset_y 以方格尺寸的比例平移调整可视区域。
+#[cfg(test)]
 fn object_cover_transform(
     image: &DynamicImage,
     target_width: u32,
@@ -409,7 +436,7 @@ fn object_cover_transform(
     scale: f32,
     offset_x: f32,
     offset_y: f32,
-) -> DynamicImage {
+) -> image::RgbaImage {
     let scale = scale.clamp(1.0, 6.0);
     let offset_x = offset_x.clamp(-1.0, 1.0);
     let offset_y = offset_y.clamp(-1.0, 1.0);
@@ -427,20 +454,8 @@ fn object_cover_transform(
     let center_y = (target_height as f32 - resize_height as f32) / 2.0;
     let paste_x = clamp_cover_paste_offset(center_x, offset_x, target_width, resize_width);
     let paste_y = clamp_cover_paste_offset(center_y, offset_y, target_height, resize_height);
-    imageops::overlay(&mut tile, &resized.to_rgba8(), paste_x, paste_y);
-    DynamicImage::ImageRgba8(tile)
-}
-
-fn overlay_rounded(canvas: &mut DynamicImage, image: &DynamicImage, rect: Rect, radius: u32) {
-    let mut tile = image.to_rgba8();
-    for y in 0..tile.height() {
-        for x in 0..tile.width() {
-            if !inside_rounded_rect(x, y, tile.width(), tile.height(), radius) {
-                tile.get_pixel_mut(x, y).0[3] = 0;
-            }
-        }
-    }
-    imageops::overlay(canvas, &DynamicImage::ImageRgba8(tile), rect.x.into(), rect.y.into());
+    image::imageops::overlay(&mut tile, &resized.to_rgba8(), paste_x, paste_y);
+    tile
 }
 
 fn parse_background_color(value: &str) -> Result<Rgba<u8>> {
@@ -457,27 +472,56 @@ fn parse_background_color(value: &str) -> Result<Rgba<u8>> {
     Ok(Rgba([red, green, blue, 255]))
 }
 
-fn output_file_name(base_stem: &str, naming_pattern: &str, output_format: &str, index: u32) -> String {
+fn output_file_name(
+    base_stem: &str,
+    naming_pattern: &str,
+    output_format: &str,
+    index: u32,
+) -> String {
     let extension = output_format_extension(output_format);
     match naming_pattern {
         "source-name-original" => format!("{}.{}", base_stem, extension),
-        "source-name-date" => format!("{}-stitch-{}-{:03}.{}", base_stem, current_date_stamp(), index, extension),
+        "source-name-date" => format!(
+            "{}-stitch-{}-{:03}.{}",
+            base_stem,
+            current_date_stamp(),
+            index,
+            extension
+        ),
         _ => format!("{}-stitch-{:03}.{}", base_stem, index, extension),
     }
 }
 
-fn next_output_path(output_directory: &Path, base_stem: &str, request: &StitchImageFilesRequest) -> PathBuf {
+fn next_output_path(
+    output_directory: &Path,
+    base_stem: &str,
+    request: &StitchImageFilesRequest,
+) -> PathBuf {
     for index in 1..=9999 {
-        let candidate = output_directory.join(output_file_name(base_stem, &request.naming_pattern, &request.output_format, index));
+        let candidate = output_directory.join(output_file_name(
+            base_stem,
+            &request.naming_pattern,
+            &request.output_format,
+            index,
+        ));
         if !candidate.exists() {
             return candidate;
         }
     }
-    output_directory.join(output_file_name(base_stem, &request.naming_pattern, &request.output_format, 10_000))
+    output_directory.join(output_file_name(
+        base_stem,
+        &request.naming_pattern,
+        &request.output_format,
+        10_000,
+    ))
 }
 
 fn validate_request(request: &StitchImageFilesRequest) -> Result<()> {
-    let filled_count = request.cells.iter().filter(|cell| !cell.source_path.trim().is_empty()).count();
+    let filled_count = request
+        .cells
+        .iter()
+        .filter(|cell| !cell.source_path.trim().is_empty())
+        .count();
     if filled_count < 2 {
         anyhow::bail!("请至少选择 2 张图片进行拼接");
     }
@@ -487,11 +531,19 @@ fn validate_request(request: &StitchImageFilesRequest) -> Result<()> {
     if request.padding > 100 || request.spacing > 100 || request.border_radius > 50 {
         anyhow::bail!("边距、间距或圆角参数超出范围");
     }
-    if !matches!(normalized_format(&request.output_format).as_str(), "jpg" | "png" | "webp") {
+    if !matches!(
+        normalized_format(&request.output_format).as_str(),
+        "jpg" | "png" | "webp"
+    ) {
         anyhow::bail!("不支持的输出格式: {}", request.output_format);
     }
     for cell in &request.cells {
-        layout_rect(request, cell, canvas_dimensions(&request.canvas_ratio, request.resolution)?.0, canvas_dimensions(&request.canvas_ratio, request.resolution)?.1)?;
+        layout_rect(
+            request,
+            cell,
+            canvas_dimensions(&request.canvas_ratio, request.resolution)?.0,
+            canvas_dimensions(&request.canvas_ratio, request.resolution)?.1,
+        )?;
     }
     Ok(())
 }
@@ -499,35 +551,79 @@ fn validate_request(request: &StitchImageFilesRequest) -> Result<()> {
 fn stitch_image_files_impl(request: StitchImageFilesRequest) -> Result<StitchImageFilesResult> {
     validate_request(&request)?;
     let background = parse_background_color(&request.background_color)?;
-    let (canvas_width, canvas_height) = canvas_dimensions(&request.canvas_ratio, request.resolution)?;
+    let (canvas_width, canvas_height) =
+        canvas_dimensions(&request.canvas_ratio, request.resolution)?;
     let pixels = (canvas_width as u64).saturating_mul(canvas_height as u64);
     if pixels > MAX_OUTPUT_PIXELS {
         anyhow::bail!("拼接输出尺寸过大，请降低清晰度");
     }
 
-    let mut canvas = DynamicImage::ImageRgba8(ImageBuffer::from_pixel(canvas_width, canvas_height, background));
+    let mut canvas = DynamicImage::ImageRgba8(ImageBuffer::from_pixel(
+        canvas_width,
+        canvas_height,
+        background,
+    ));
     let mut first_source: Option<PathBuf> = None;
     let mut stitched_count = 0u32;
 
-    for cell in request.cells.iter().filter(|cell| !cell.source_path.trim().is_empty()) {
+    for cell in request
+        .cells
+        .iter()
+        .filter(|cell| !cell.source_path.trim().is_empty())
+    {
         let rect = layout_rect(&request, cell, canvas_width, canvas_height)?;
         let source = PathBuf::from(&cell.source_path);
         if first_source.is_none() {
             first_source = Some(source.clone());
         }
-        let image = image::open(&source).with_context(|| format!("无法打开图片: {}", source_name(&source, &cell.source_path)))?;
-        let placed = object_cover_transform(&image, rect.width, rect.height, cell.scale, cell.offset_x, cell.offset_y);
-        overlay_rounded(&mut canvas, &placed, rect, request.border_radius);
+        let dimensions = image::image_dimensions(&source).with_context(|| {
+            format!(
+                "无法读取图片尺寸: {}",
+                source_name(&source, &cell.source_path)
+            )
+        })?;
+        let placed = image_pipeline::render_cover_tile(
+            &source,
+            geometry::Size {
+                width: dimensions.0,
+                height: dimensions.1,
+            },
+            geometry::Size {
+                width: rect.width,
+                height: rect.height,
+            },
+            cell.scale,
+            cell.offset_x,
+            cell.offset_y,
+        )?;
+        let canvas = canvas.as_mut_rgba8().context("拼接画布不是 RGBA 图像")?;
+        image_pipeline::composite_tile(
+            canvas,
+            placed,
+            image_pipeline::DestinationPlacement {
+                x: rect.x.into(),
+                y: rect.y.into(),
+            },
+            request.border_radius,
+        );
         stitched_count += 1;
     }
 
     let output_directory = PathBuf::from(&request.output_directory);
     fs::create_dir_all(&output_directory)
         .with_context(|| format!("无法创建输出目录: {}", output_directory.display()))?;
-    let base_stem = first_source.as_ref().map(|path| stem(path)).unwrap_or_else(|| "stitched".into());
+    let base_stem = first_source
+        .as_ref()
+        .map(|path| stem(path))
+        .unwrap_or_else(|| "stitched".into());
     let output_path = next_output_path(&output_directory, &base_stem, &request);
     let canvas = apply_color_mode(canvas, &request.color_mode);
-    write_dynamic_image(&output_path, &canvas, &request.output_format, Some(request.quality))?;
+    write_dynamic_image(
+        &output_path,
+        &canvas,
+        &request.output_format,
+        Some(request.quality),
+    )?;
 
     Ok(StitchImageFilesResult {
         output_path: output_path.to_string_lossy().into_owned(),
@@ -543,8 +639,12 @@ mod tests {
     #[test]
     fn object_cover_transform_clamps_positive_offset_to_keep_cell_covered() {
         // 竖长图导入方格后被拖到极端位置，方格边缘不应出现透明像素（白边）。
-        let source = DynamicImage::ImageRgb8(ImageBuffer::<Rgb<u8>, _>::from_pixel(50, 150, Rgb([20, 40, 60])));
-        let placed = object_cover_transform(&source, 25, 25, 1.0, 1.0, 1.0).to_rgba8();
+        let source = DynamicImage::ImageRgb8(ImageBuffer::<Rgb<u8>, _>::from_pixel(
+            50,
+            150,
+            Rgb([20, 40, 60]),
+        ));
+        let placed = object_cover_transform(&source, 25, 25, 1.0, 1.0, 1.0);
 
         for x in 0..25 {
             assert_ne!(placed.get_pixel(x, 0).0[3], 0);
@@ -558,8 +658,12 @@ mod tests {
 
     #[test]
     fn object_cover_transform_clamps_negative_offset_to_keep_cell_covered() {
-        let source = DynamicImage::ImageRgb8(ImageBuffer::<Rgb<u8>, _>::from_pixel(150, 50, Rgb([20, 40, 60])));
-        let placed = object_cover_transform(&source, 25, 25, 1.0, -1.0, -1.0).to_rgba8();
+        let source = DynamicImage::ImageRgb8(ImageBuffer::<Rgb<u8>, _>::from_pixel(
+            150,
+            50,
+            Rgb([20, 40, 60]),
+        ));
+        let placed = object_cover_transform(&source, 25, 25, 1.0, -1.0, -1.0);
 
         for x in 0..25 {
             assert_ne!(placed.get_pixel(x, 0).0[3], 0);
@@ -573,7 +677,13 @@ mod tests {
 
     #[test]
     fn stitching_original_name_uses_first_source_stem() {
-        assert_eq!(output_file_name("first", "source-name-original", "png", 1), "first.png");
-        assert_eq!(output_file_name("first", "source-name-index", "png", 1), "first-stitch-001.png");
+        assert_eq!(
+            output_file_name("first", "source-name-original", "png", 1),
+            "first.png"
+        );
+        assert_eq!(
+            output_file_name("first", "source-name-index", "png", 1),
+            "first-stitch-001.png"
+        );
     }
 }

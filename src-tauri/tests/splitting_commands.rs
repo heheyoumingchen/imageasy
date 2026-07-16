@@ -4,18 +4,17 @@ use image::{GenericImageView, ImageBuffer, Rgba};
 use tempfile::tempdir;
 
 use imageasy_lib::commands::splitting::{
-    inspect_splitting_directory,
-    inspect_splitting_file,
-    split_image_file_with_resource_dir,
-    InspectSplittingFileResult,
-    SplitImageFileRequest,
+    inspect_splitting_directory, inspect_splitting_file, split_image_file_with_resource_dir,
+    InspectSplittingFileResult, SplitImageFileRequest,
 };
 
 fn run_inspect_splitting_file(path: String) -> Result<InspectSplittingFileResult, String> {
     tauri::async_runtime::block_on(inspect_splitting_file(path))
 }
 
-fn run_inspect_splitting_directory(path: String) -> Result<Vec<InspectSplittingFileResult>, String> {
+fn run_inspect_splitting_directory(
+    path: String,
+) -> Result<Vec<InspectSplittingFileResult>, String> {
     tauri::async_runtime::block_on(inspect_splitting_directory(path))
 }
 
@@ -70,7 +69,8 @@ fn inspect_splitting_directory_recursively_collects_images_and_pdf() {
     write_minimal_empty_pdf(&nested.join("b.pdf"));
     fs::write(nested.join("c.txt"), b"unsupported").unwrap();
 
-    let result = run_inspect_splitting_directory(dir.path().to_string_lossy().into_owned()).unwrap();
+    let result =
+        run_inspect_splitting_directory(dir.path().to_string_lossy().into_owned()).unwrap();
 
     assert_eq!(result.len(), 2);
     assert_eq!(result[0].kind, "image");

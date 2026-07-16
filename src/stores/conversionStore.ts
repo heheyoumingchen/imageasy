@@ -64,7 +64,8 @@ const buildDocumentSummary = (settings: ConversionOutputSettings, item: Conversi
     outputFormat: exportSettings.outputFormat,
     colorMode: exportSettings.colorMode,
     pageRangeMode: item.outputSettingsOverride.pageRangeMode ?? settings.pageRangeMode,
-    pageRangeText: item.outputSettingsOverride.pageRangeText ?? settings.pageRangeText
+    pageRangeText: item.outputSettingsOverride.pageRangeText ?? settings.pageRangeText,
+    pageCount: item.documentMetadata?.pageCount ?? null
   });
 };
 
@@ -122,11 +123,13 @@ export const useConversionStore = create<ConversionStore>((set, get) => ({
     const pageRangeMode = item.outputSettingsOverride.pageRangeMode ?? get().globalSettings.pageRangeMode;
     const pageRangeText = item.outputSettingsOverride.pageRangeText ?? get().globalSettings.pageRangeText;
 
+    // all 交给后端展开（空列表 = 全部页），未知页数时也无从枚举。
     if (pageRangeMode === 'all') {
-      return Array.from({ length: item.documentMetadata.pageCount }, (_, index) => index + 1);
+      return [];
     }
 
-    return expandPageRange(pageRangeText, item.documentMetadata.pageCount);
+    // 页数已知时才用上界校验；未知（Office 文档）仅做语法解析。
+    return expandPageRange(pageRangeText, item.documentMetadata.pageCount ?? undefined);
   },
   buildItemSummary: (id) => {
     const item = get().items.find((entry) => entry.id === id);

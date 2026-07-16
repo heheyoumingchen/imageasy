@@ -3,7 +3,7 @@ use serde::Serialize;
 use std::path::Path;
 use std::process::Command;
 
-use super::{editor, image_download};
+use super::{editor, image_download, stitching};
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -11,6 +11,8 @@ pub struct CacheUsageResult {
     pub download_thumbnail_bytes: u64,
     pub editor_working_bytes: u64,
     pub editor_thumbnail_bytes: u64,
+    pub editor_preview_bytes: u64,
+    pub stitching_thumbnail_bytes: u64,
     pub total_bytes: u64,
 }
 
@@ -50,14 +52,24 @@ pub fn clear_directory_contents(path: &Path) -> Result<()> {
 }
 
 fn get_app_cache_usage_impl() -> Result<CacheUsageResult> {
-    let download_thumbnail_bytes = calculate_directory_size(&image_download::download_thumbnail_cache_dir()?)?;
+    let download_thumbnail_bytes =
+        calculate_directory_size(&image_download::download_thumbnail_cache_dir()?)?;
     let editor_working_bytes = calculate_directory_size(&editor::editor_working_cache_dir())?;
     let editor_thumbnail_bytes = calculate_directory_size(&editor::editor_thumbnail_cache_dir())?;
+    let editor_preview_bytes = calculate_directory_size(&editor::editor_preview_cache_dir())?;
+    let stitching_thumbnail_bytes =
+        calculate_directory_size(&stitching::stitching_thumbnail_cache_dir())?;
     Ok(CacheUsageResult {
         download_thumbnail_bytes,
         editor_working_bytes,
         editor_thumbnail_bytes,
-        total_bytes: download_thumbnail_bytes + editor_working_bytes + editor_thumbnail_bytes,
+        editor_preview_bytes,
+        stitching_thumbnail_bytes,
+        total_bytes: download_thumbnail_bytes
+            + editor_working_bytes
+            + editor_thumbnail_bytes
+            + editor_preview_bytes
+            + stitching_thumbnail_bytes,
     })
 }
 
@@ -65,6 +77,8 @@ fn clear_app_cache_impl() -> Result<CacheUsageResult> {
     clear_directory_contents(&image_download::download_thumbnail_cache_dir()?)?;
     clear_directory_contents(&editor::editor_working_cache_dir())?;
     clear_directory_contents(&editor::editor_thumbnail_cache_dir())?;
+    clear_directory_contents(&editor::editor_preview_cache_dir())?;
+    clear_directory_contents(&stitching::stitching_thumbnail_cache_dir())?;
     get_app_cache_usage_impl()
 }
 

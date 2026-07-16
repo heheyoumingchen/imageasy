@@ -26,7 +26,6 @@ const StitchImagePage = () => {
             openOutputDirectory: 'Open output directory',
             layoutTemplates: 'Layout',
             stitchingSettings: 'Settings',
-            exported: (path: string) => `Exported: ${path}`,
             errors: {
               outputDirectoryRequired: 'Please choose an output directory first',
               notEnoughImages: 'At least 2 images are required',
@@ -56,7 +55,6 @@ const StitchImagePage = () => {
             openOutputDirectory: '打开输出目录',
             layoutTemplates: '布局模板',
             stitchingSettings: '拼接设置',
-            exported: (path: string) => `已导出：${path}`,
             errors: {
               outputDirectoryRequired: '请先选择输出目录',
               notEnoughImages: '至少需要 2 张图片',
@@ -127,7 +125,7 @@ const StitchImagePage = () => {
             type="button"
             className="flex h-10 items-center gap-2 px-4 rounded-lg border border-border-light bg-white text-[#515867] text-[13px] font-bold hover:border-meitu hover:text-meitu transition-all disabled:opacity-50"
             onClick={workflow.openOutputDirectory}
-            disabled={!workflow.outputDirectory}
+            disabled={!workflow.lastOutputDirectory}
           >
             <FolderOpen size={16} />
             {copy.openOutputDirectory}
@@ -139,18 +137,11 @@ const StitchImagePage = () => {
       <div className="flex-1 flex min-h-0 overflow-hidden">
         {/* 中间：画布预览区 */}
         <div className="flex-1 min-w-0 flex flex-col">
-          {(workflow.pageError || workflow.lastOutputPath) && (
+          {workflow.pageError && (
             <div className="px-6 pt-4">
-              {workflow.pageError && (
-                <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm font-bold text-red-600">
-                  {workflow.pageError}
-                </div>
-              )}
-              {workflow.lastOutputPath && (
-                <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-bold text-emerald-600">
-                  {copy.exported(workflow.lastOutputPath)}
-                </div>
-              )}
+              <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm font-bold text-red-600">
+                {workflow.pageError}
+              </div>
             </div>
           )}
           <div className="flex-1 min-h-0">

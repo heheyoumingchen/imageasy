@@ -1,6 +1,9 @@
 use anyhow::{Context, Result};
 use base64::{engine::general_purpose::STANDARD, Engine as _};
-use image::{codecs::jpeg::JpegEncoder, imageops, imageops::FilterType, DynamicImage, GenericImageView, ImageBuffer, Rgb, Rgba};
+use image::{
+    codecs::jpeg::JpegEncoder, imageops, imageops::FilterType, DynamicImage, GenericImageView,
+    ImageBuffer, Rgb, Rgba,
+};
 use jpeg_decoder::Decoder as JpegDecoder;
 use std::{
     collections::HashMap,
@@ -12,13 +15,14 @@ use std::{
 };
 
 use super::{
-    apply_adjustments, apply_saturation, mix_channel, shift_channel,
-    GenerateImagePreviewRequest, GenerateImagePreviewResult, PrefetchImagePreviewRequest,
-    PREVIEW_CACHE,
+    apply_adjustments, apply_saturation, mix_channel, shift_channel, GenerateImagePreviewRequest,
+    GenerateImagePreviewResult, PrefetchImagePreviewRequest, PREVIEW_CACHE,
 };
 
 #[tauri::command]
-pub async fn generate_image_preview(request: GenerateImagePreviewRequest) -> Result<GenerateImagePreviewResult, String> {
+pub async fn generate_image_preview(
+    request: GenerateImagePreviewRequest,
+) -> Result<GenerateImagePreviewResult, String> {
     tauri::async_runtime::spawn_blocking(move || {
         generate_image_preview_impl(request).map_err(|error| error.to_string())
     })
@@ -67,7 +71,11 @@ fn preview_cache_key(path: &str, width: u32, height: u32) -> Result<String> {
         .and_then(|value| value.duration_since(UNIX_EPOCH).ok())
         .map(|value| value.as_millis())
         .unwrap_or(0);
-    Ok(format!("{}::{width}x{height}::{mtime}:{}", path.display(), metadata.len()))
+    Ok(format!(
+        "{}::{width}x{height}::{mtime}:{}",
+        path.display(),
+        metadata.len()
+    ))
 }
 
 // ─── JPEG 快速降采样解码 ────────────────────────────────────────────────────────
@@ -76,12 +84,17 @@ fn preview_cache_key(path: &str, width: u32, height: u32) -> Result<String> {
 /// decoder.scale(w, h) 内部自动选择最佳 DCT 缩放因子（1/1, 1/2, 1/4, 1/8），
 /// 产出一张至少覆盖目标尺寸的解码结果。
 /// 对于 6000x4000 的图片，目标 760x560 时约使用 1/8 解码，比完整解码快数倍。
-fn fast_decode_jpeg_for_preview(path: &Path, target_width: u32, target_height: u32) -> Result<DynamicImage> {
-    let file = fs::File::open(path)
-        .with_context(|| format!("无法打开 JPEG: {}", path.display()))?;
+fn fast_decode_jpeg_for_preview(
+    path: &Path,
+    target_width: u32,
+    target_height: u32,
+) -> Result<DynamicImage> {
+    let file =
+        fs::File::open(path).with_context(|| format!("无法打开 JPEG: {}", path.display()))?;
     let mut decoder = JpegDecoder::new(BufReader::new(file));
 
-    decoder.read_info()
+    decoder
+        .read_info()
         .with_context(|| format!("无法读取 JPEG 头部: {}", path.display()))?;
 
     let info = decoder.info().context("JPEG 信息不可用")?;
@@ -91,11 +104,13 @@ fn fast_decode_jpeg_for_preview(path: &Path, target_width: u32, target_height: u
     if src_w > target_width * 2 || src_h > target_height * 2 {
         let scale_w = target_width.min(u16::MAX as u32) as u16;
         let scale_h = target_height.min(u16::MAX as u32) as u16;
-        decoder.scale(scale_w, scale_h)
+        decoder
+            .scale(scale_w, scale_h)
             .with_context(|| format!("无法设置 JPEG 缩放: {}x{}", scale_w, scale_h))?;
     }
 
-    let pixels = decoder.decode()
+    let pixels = decoder
+        .decode()
         .with_context(|| format!("JPEG 解码失败: {}", path.display()))?;
 
     let decoded_info = decoder.info().context("解码后信息不可用")?;
@@ -108,14 +123,14 @@ fn fast_decode_jpeg_for_preview(path: &Path, target_width: u32, target_height: u
             DynamicImage::ImageRgb8(buffer)
         }
         jpeg_decoder::PixelFormat::L8 => {
-            let buffer = image::ImageBuffer::<image::Luma<u8>, _>::from_raw(decoded_w, decoded_h, pixels)
-                .context("无法构建灰度图像缓冲")?;
+            let buffer =
+                image::ImageBuffer::<image::Luma<u8>, _>::from_raw(decoded_w, decoded_h, pixels)
+                    .context("无法构建灰度图像缓冲")?;
             DynamicImage::ImageLuma8(buffer)
         }
         _ => {
             // CMYK 等罕见格式，回退到 image crate 完整解码
-            image::open(path)
-                .with_context(|| format!("无法打开图片: {}", path.display()))?
+            image::open(path).with_context(|| format!("无法打开图片: {}", path.display()))?
         }
     };
 
@@ -156,8 +171,8 @@ fn write_preview_jpeg(path: &Path, image: &DynamicImage) -> Result<()> {
         fs::create_dir_all(parent)
             .with_context(|| format!("无法创建预览缓存目录: {}", parent.display()))?;
     }
-    let file = fs::File::create(path)
-        .with_context(|| format!("无法创建预览文件: {}", path.display()))?;
+    let file =
+        fs::File::create(path).with_context(|| format!("无法创建预览文件: {}", path.display()))?;
     let mut writer = std::io::BufWriter::new(file);
     let mut encoder = JpegEncoder::new_with_quality(&mut writer, 75);
     encoder.encode_image(image)?;
@@ -166,7 +181,9 @@ fn write_preview_jpeg(path: &Path, image: &DynamicImage) -> Result<()> {
 
 // ─── 预览生成主逻辑 ─────────────────────────────────────────────────────────────
 
-fn generate_image_preview_impl(request: GenerateImagePreviewRequest) -> Result<GenerateImagePreviewResult> {
+fn generate_image_preview_impl(
+    request: GenerateImagePreviewRequest,
+) -> Result<GenerateImagePreviewResult> {
     let preview_width = request.max_width.unwrap_or(760);
     let preview_height = request.max_height.unwrap_or(560);
 
@@ -242,16 +259,14 @@ fn get_or_prepare_preview_image(path: &str, width: u32, height: u32) -> Result<D
 
     // JPEG 使用快速降采样解码
     let prepared = if matches!(extension.as_str(), "jpg" | "jpeg") {
-        fast_decode_jpeg_for_preview(source_path, width, height)
-            .unwrap_or_else(|_| {
-                // 降采样解码失败时回退到完整解码
-                image::open(path)
-                    .map(|img| img.resize(width, height, FilterType::Triangle))
-                    .unwrap_or_else(|_| DynamicImage::new_rgb8(1, 1))
-            })
+        fast_decode_jpeg_for_preview(source_path, width, height).unwrap_or_else(|_| {
+            // 降采样解码失败时回退到完整解码
+            image::open(path)
+                .map(|img| img.resize(width, height, FilterType::Triangle))
+                .unwrap_or_else(|_| DynamicImage::new_rgb8(1, 1))
+        })
     } else {
-        let source_image = image::open(path)
-            .with_context(|| format!("无法打开图片: {path}"))?;
+        let source_image = image::open(path).with_context(|| format!("无法打开图片: {path}"))?;
         source_image.resize(width, height, FilterType::Triangle)
     };
 
@@ -310,9 +325,15 @@ pub(crate) fn apply_clarity(image: DynamicImage, amount: f32) -> DynamicImage {
         let [r, g, b, a] = pixel.0;
         let [br, bg, bb, _] = blurred_pixel.0;
 
-        let nr = ((r as f32) + (r as f32 - br as f32) * mix_amount).round().clamp(0.0, 255.0) as u8;
-        let ng = ((g as f32) + (g as f32 - bg as f32) * mix_amount).round().clamp(0.0, 255.0) as u8;
-        let nb = ((b as f32) + (b as f32 - bb as f32) * mix_amount).round().clamp(0.0, 255.0) as u8;
+        let nr = ((r as f32) + (r as f32 - br as f32) * mix_amount)
+            .round()
+            .clamp(0.0, 255.0) as u8;
+        let ng = ((g as f32) + (g as f32 - bg as f32) * mix_amount)
+            .round()
+            .clamp(0.0, 255.0) as u8;
+        let nb = ((b as f32) + (b as f32 - bb as f32) * mix_amount)
+            .round()
+            .clamp(0.0, 255.0) as u8;
         *pixel = Rgba([nr, ng, nb, a]);
     }
 
@@ -332,7 +353,13 @@ fn apply_grayscale_filter(image: DynamicImage, amount: f32) -> DynamicImage {
     DynamicImage::ImageRgba8(rgba)
 }
 
-fn apply_channel_mix_filter(image: DynamicImage, amount: f32, red_shift: f32, green_shift: f32, blue_shift: f32) -> DynamicImage {
+fn apply_channel_mix_filter(
+    image: DynamicImage,
+    amount: f32,
+    red_shift: f32,
+    green_shift: f32,
+    blue_shift: f32,
+) -> DynamicImage {
     let mut rgba = image.to_rgba8();
     for pixel in rgba.pixels_mut() {
         let [r, g, b, a] = pixel.0;

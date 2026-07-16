@@ -18,7 +18,10 @@ pub fn parse_webpage_images(base_url: &str, html: &str) -> Result<Vec<Downloadab
     collect_images_from_html(base_url, html, false)
 }
 
-pub fn parse_wechat_article_images(base_url: &str, html: &str) -> Result<Vec<DownloadableImageItem>> {
+pub fn parse_wechat_article_images(
+    base_url: &str,
+    html: &str,
+) -> Result<Vec<DownloadableImageItem>> {
     collect_images_from_html(base_url, html, true)
 }
 
@@ -34,7 +37,10 @@ fn stable_image_id(normalized_url: &str) -> String {
 pub fn infer_format_from_source(source: &str) -> Option<String> {
     let url = url::Url::parse(source).ok()?;
     let last = url.path_segments()?.last()?;
-    let ext = last.rsplit_once('.').map(|(_, ext)| ext).unwrap_or_default();
+    let ext = last
+        .rsplit_once('.')
+        .map(|(_, ext)| ext)
+        .unwrap_or_default();
     let normalized = ext.to_ascii_lowercase();
     match normalized.as_str() {
         "jpg" | "jpeg" => Some("jpg".into()),
@@ -52,7 +58,10 @@ fn normalize_embedded_url_candidate(part: &str) -> Option<String> {
         .trim()
         .trim_matches(['"', '\'', '`'])
         .trim_end_matches([',', ';', ']', '}', '\\']);
-    let unescaped = trimmed.replace("\\/", "/").replace("\\u002F", "/").replace("\\u002f", "/");
+    let unescaped = trimmed
+        .replace("\\/", "/")
+        .replace("\\u002F", "/")
+        .replace("\\u002f", "/");
 
     if unescaped.starts_with("https://") || unescaped.starts_with("http://") {
         return Some(unescaped);
@@ -64,12 +73,17 @@ fn normalize_embedded_url_candidate(part: &str) -> Option<String> {
 }
 
 fn extract_image_urls_from_text(text: &str) -> Vec<String> {
-    text.split(['\"', '\'', '`', ' ', '\n', '\r', '\t', '<', '>', ')', '(', '{', '}'])
-        .filter_map(normalize_embedded_url_candidate)
-        .filter(|candidate| {
-            matches!(infer_format_from_source(candidate).as_deref(), Some("jpg" | "png" | "webp" | "gif" | "bmp" | "avif"))
-        })
-        .collect()
+    text.split([
+        '\"', '\'', '`', ' ', '\n', '\r', '\t', '<', '>', ')', '(', '{', '}',
+    ])
+    .filter_map(normalize_embedded_url_candidate)
+    .filter(|candidate| {
+        matches!(
+            infer_format_from_source(candidate).as_deref(),
+            Some("jpg" | "png" | "webp" | "gif" | "bmp" | "avif")
+        )
+    })
+    .collect()
 }
 
 fn collect_images_from_html(
@@ -80,8 +94,10 @@ fn collect_images_from_html(
     let document = scraper::Html::parse_document(html);
     let img_selector = scraper::Selector::parse("img").unwrap();
     let source_selector = scraper::Selector::parse("source[srcset]").unwrap();
-    let article_selector =
-        scraper::Selector::parse("#page-content, #img-content, #js_content, article, .article-content, .article-detail").unwrap();
+    let article_selector = scraper::Selector::parse(
+        "#page-content, #img-content, #js_content, article, .article-content, .article-detail",
+    )
+    .unwrap();
     let base = url::Url::parse(base_url)?;
     let mut seen = BTreeSet::new();
     let mut items = Vec::new();
@@ -143,7 +159,11 @@ fn collect_images_from_html(
             .chain(srcset_candidates.iter().map(|s| s.as_str()))
             .collect();
 
-        let title = node.value().attr("alt").or_else(|| node.value().attr("title")).unwrap_or_default();
+        let title = node
+            .value()
+            .attr("alt")
+            .or_else(|| node.value().attr("title"))
+            .unwrap_or_default();
         for candidate in all_candidates {
             push_image_item(&base, candidate, title, &mut seen, &mut items);
         }

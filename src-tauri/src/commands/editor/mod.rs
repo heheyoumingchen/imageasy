@@ -8,7 +8,9 @@ pub use save::save_image_as_jpg;
 
 use anyhow::{Context, Result};
 use base64::{engine::general_purpose::STANDARD, Engine as _};
-use image::{codecs::jpeg::JpegEncoder, imageops::FilterType, DynamicImage, ImageBuffer, Rgb, Rgba};
+use image::{
+    codecs::jpeg::JpegEncoder, imageops::FilterType, DynamicImage, ImageBuffer, Rgb, Rgba,
+};
 use jpeg_decoder::Decoder as JpegDecoder;
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
@@ -25,7 +27,8 @@ pub(crate) const SUPPORTED_EXTENSIONS: &[&str] = &["jpg", "jpeg", "png", "webp",
 
 type PreviewCacheKey = String;
 
-pub(crate) static PREVIEW_CACHE: OnceLock<Mutex<HashMap<PreviewCacheKey, DynamicImage>>> = OnceLock::new();
+pub(crate) static PREVIEW_CACHE: OnceLock<Mutex<HashMap<PreviewCacheKey, DynamicImage>>> =
+    OnceLock::new();
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -195,8 +198,14 @@ fn open_image_session_impl(path: &str) -> Result<OpenImageSessionResult> {
         .collect::<Vec<_>>();
 
     sibling_paths.sort_by(|left, right| {
-        let left_name = left.file_name().and_then(|name| name.to_str()).unwrap_or_default();
-        let right_name = right.file_name().and_then(|name| name.to_str()).unwrap_or_default();
+        let left_name = left
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or_default();
+        let right_name = right
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or_default();
         left_name.cmp(right_name)
     });
 
@@ -230,9 +239,7 @@ pub fn editor_thumbnail_cache_dir() -> PathBuf {
     if let Some(cache) = crate::portable::portable_cache_dir() {
         cache.join("editor-thumbs")
     } else {
-        std::env::temp_dir()
-            .join("imageasy")
-            .join("editor-thumbs")
+        std::env::temp_dir().join("imageasy").join("editor-thumbs")
     }
 }
 
@@ -240,9 +247,7 @@ pub fn editor_working_cache_dir() -> PathBuf {
     if let Some(cache) = crate::portable::portable_cache_dir() {
         cache.join("editor-work")
     } else {
-        std::env::temp_dir()
-            .join("imageasy")
-            .join("editor-work")
+        std::env::temp_dir().join("imageasy").join("editor-work")
     }
 }
 
@@ -294,7 +299,8 @@ fn create_thumbnail_data_url(path: &Path, size: u32, quality: u8) -> Result<Stri
     }
 
     // JPEG 使用 DCT 快速降采样解码，非 JPEG 使用完整解码
-    let extension = path.extension()
+    let extension = path
+        .extension()
         .and_then(|e| e.to_str())
         .unwrap_or("")
         .to_ascii_lowercase();
@@ -302,7 +308,8 @@ fn create_thumbnail_data_url(path: &Path, size: u32, quality: u8) -> Result<Stri
     let thumbnail = if matches!(extension.as_str(), "jpg" | "jpeg") {
         fast_decode_jpeg_thumbnail(path, size)?
     } else {
-        let image = image::open(path).with_context(|| format!("无法打开缩略图源文件: {}", path.display()))?;
+        let image = image::open(path)
+            .with_context(|| format!("无法打开缩略图源文件: {}", path.display()))?;
         image.resize(size, size, FilterType::Nearest)
     };
 
@@ -323,19 +330,22 @@ fn create_thumbnail_data_url(path: &Path, size: u32, quality: u8) -> Result<Stri
 
 /// JPEG 缩略图快速解码：利用 DCT 缩放因子直接产出小图。
 fn fast_decode_jpeg_thumbnail(path: &Path, size: u32) -> Result<DynamicImage> {
-    let file = fs::File::open(path)
-        .with_context(|| format!("无法打开 JPEG: {}", path.display()))?;
+    let file =
+        fs::File::open(path).with_context(|| format!("无法打开 JPEG: {}", path.display()))?;
     let mut decoder = JpegDecoder::new(std::io::BufReader::new(file));
 
-    decoder.read_info()
+    decoder
+        .read_info()
         .with_context(|| format!("无法读取 JPEG 头部: {}", path.display()))?;
 
     // 设置目标尺寸，解码器自动选择最优 DCT 缩放因子（1/8 最快）
     let scale = size.min(u16::MAX as u32) as u16;
-    decoder.scale(scale, scale)
+    decoder
+        .scale(scale, scale)
         .with_context(|| format!("无法设置 JPEG 缩放: {}", path.display()))?;
 
-    let pixels = decoder.decode()
+    let pixels = decoder
+        .decode()
         .with_context(|| format!("JPEG 解码失败: {}", path.display()))?;
 
     let info = decoder.info().context("解码后信息不可用")?;
@@ -353,8 +363,8 @@ fn fast_decode_jpeg_thumbnail(path: &Path, size: u32) -> Result<DynamicImage> {
             DynamicImage::ImageLuma8(buffer)
         }
         _ => {
-            let image = image::open(path)
-                .with_context(|| format!("无法打开图片: {}", path.display()))?;
+            let image =
+                image::open(path).with_context(|| format!("无法打开图片: {}", path.display()))?;
             image.resize(size, size, FilterType::Nearest)
         }
     };
@@ -368,15 +378,23 @@ fn fast_decode_jpeg_thumbnail(path: &Path, size: u32) -> Result<DynamicImage> {
 }
 
 pub(crate) fn read_image_summary(path: &Path) -> Result<EditorImageSummary> {
-    let metadata = fs::metadata(path)
-        .with_context(|| format!("无法读取文件信息: {}", path.display()))?;
+    let metadata =
+        fs::metadata(path).with_context(|| format!("无法读取文件信息: {}", path.display()))?;
     let dimensions = image::image_dimensions(path)
         .with_context(|| format!("无法读取图片尺寸: {}", path.display()))?;
 
     Ok(EditorImageSummary {
         path: path.to_string_lossy().into_owned(),
-        name: path.file_name().and_then(|name| name.to_str()).unwrap_or_default().to_string(),
-        extension: path.extension().and_then(|extension| extension.to_str()).unwrap_or_default().to_ascii_lowercase(),
+        name: path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or_default()
+            .to_string(),
+        extension: path
+            .extension()
+            .and_then(|extension| extension.to_str())
+            .unwrap_or_default()
+            .to_ascii_lowercase(),
         width: dimensions.0,
         height: dimensions.1,
         size_bytes: metadata.len(),
@@ -390,14 +408,25 @@ pub(crate) fn is_supported_image(path: &Path) -> bool {
         .unwrap_or(false)
 }
 
-pub(crate) fn apply_adjustments(source: DynamicImage, adjustments: &AdjustmentParams) -> DynamicImage {
+pub(crate) fn apply_adjustments(
+    source: DynamicImage,
+    adjustments: &AdjustmentParams,
+) -> DynamicImage {
     let mut image = source.brighten(adjustments.brightness);
     image = image.adjust_contrast(adjustments.contrast as f32);
     image = apply_saturation(image, adjustments.saturation as f32 / 100.0);
-    image = apply_temperature_and_tint(image, adjustments.temperature as f32 / 100.0, adjustments.tint as f32 / 100.0);
+    image = apply_temperature_and_tint(
+        image,
+        adjustments.temperature as f32 / 100.0,
+        adjustments.tint as f32 / 100.0,
+    );
     image = filters::apply_sharpen(image, adjustments.sharpen as f32 / 100.0);
     image = filters::apply_clarity(image, adjustments.clarity as f32 / 100.0);
-    image = filters::apply_filter(image, &adjustments.filter_type, adjustments.filter_intensity as f32 / 100.0);
+    image = filters::apply_filter(
+        image,
+        &adjustments.filter_type,
+        adjustments.filter_intensity as f32 / 100.0,
+    );
     image = apply_rotation(image, adjustments.rotation);
     apply_crop(image, adjustments.crop.as_ref())
 }
@@ -447,7 +476,11 @@ pub(crate) fn apply_saturation(image: DynamicImage, amount: f32) -> DynamicImage
     DynamicImage::ImageRgba8(rgba)
 }
 
-pub(crate) fn apply_temperature_and_tint(image: DynamicImage, temperature: f32, tint: f32) -> DynamicImage {
+pub(crate) fn apply_temperature_and_tint(
+    image: DynamicImage,
+    temperature: f32,
+    tint: f32,
+) -> DynamicImage {
     if temperature.abs() < f32::EPSILON && tint.abs() < f32::EPSILON {
         return image;
     }
@@ -464,7 +497,9 @@ pub(crate) fn apply_temperature_and_tint(image: DynamicImage, temperature: f32, 
 }
 
 pub(crate) fn mix_channel(source: f32, target: f32, amount: f32) -> u8 {
-    (source + (target - source) * amount).round().clamp(0.0, 255.0) as u8
+    (source + (target - source) * amount)
+        .round()
+        .clamp(0.0, 255.0) as u8
 }
 
 pub(crate) fn shift_channel(source: u8, shift: f32, amount: f32) -> u8 {
@@ -477,8 +512,8 @@ pub(crate) fn write_jpeg_image(path: &Path, image: &DynamicImage, quality: u8) -
             .with_context(|| format!("无法创建输出目录: {}", parent.display()))?;
     }
 
-    let file = fs::File::create(path)
-        .with_context(|| format!("无法创建输出文件: {}", path.display()))?;
+    let file =
+        fs::File::create(path).with_context(|| format!("无法创建输出文件: {}", path.display()))?;
     let mut writer = std::io::BufWriter::new(file);
     let mut encoder = JpegEncoder::new_with_quality(&mut writer, quality);
     encoder.encode_image(image)?;
@@ -486,6 +521,3 @@ pub(crate) fn write_jpeg_image(path: &Path, image: &DynamicImage, quality: u8) -
 
     Ok(())
 }
-
-
-

@@ -65,6 +65,35 @@ describe('conversionStore', () => {
     expect(getSettingsStore().getState().exportSettings.colorMode).toBe('cmyk');
   });
 
+  it('returns an empty page list for all mode so the backend can expand it', () => {
+    useConversionStore.getState().setItems([readyDocument]);
+    useConversionStore.getState().updateGlobalSettings({ pageRangeMode: 'all', pageRangeText: '' });
+
+    expect(useConversionStore.getState().buildEffectiveDocumentPages('b')).toEqual([]);
+  });
+
+  it('expands custom ranges against a known page count', () => {
+    useConversionStore.getState().setItems([readyDocument]);
+    useConversionStore.getState().updateItemOverride('b', { pageRangeMode: 'custom', pageRangeText: '2-4' });
+
+    expect(useConversionStore.getState().buildEffectiveDocumentPages('b')).toEqual([2, 3, 4]);
+  });
+
+  it('defers custom range bounds when the Office page count is unknown', () => {
+    const officeDocument = {
+      ...readyDocument,
+      id: 'office',
+      sourcePath: 'F:/demo/report.docx',
+      sourceName: 'report.docx',
+      sourceStem: 'report',
+      documentMetadata: { pageCount: null, extension: 'docx' }
+    };
+    useConversionStore.getState().setItems([officeDocument]);
+    useConversionStore.getState().updateItemOverride('office', { pageRangeMode: 'custom', pageRangeText: '13' });
+
+    expect(useConversionStore.getState().buildEffectiveDocumentPages('office')).toEqual([13]);
+  });
+
   it('aggregates batch progress from per-item statuses', () => {
     useConversionStore.getState().setItems([
       readyImage,

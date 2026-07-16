@@ -6,14 +6,21 @@ import { DEFAULT_SETTINGS } from '../../src/stores/settingsStore';
 
 const loadedSettings = DEFAULT_SETTINGS;
 
-const { loadSettings, saveSettings } = vi.hoisted(() => ({
+const { loadSettings, saveSettings, getAppCacheUsage, clearAppCache } = vi.hoisted(() => ({
   loadSettings: vi.fn(),
-  saveSettings: vi.fn()
+  saveSettings: vi.fn(),
+  getAppCacheUsage: vi.fn(),
+  clearAppCache: vi.fn()
 }));
 
 vi.mock('../../src/services/settingsCommands', () => ({
   loadSettings,
   saveSettings
+}));
+
+vi.mock('../../src/services/cacheCommands', () => ({
+  getAppCacheUsage,
+  clearAppCache
 }));
 
 vi.mock('@tauri-apps/api/webview', () => ({
@@ -40,6 +47,22 @@ describe('App bootstrap', () => {
     vi.clearAllMocks();
     loadSettings.mockResolvedValue(loadedSettings);
     saveSettings.mockImplementation(async (settings) => settings);
+    getAppCacheUsage.mockResolvedValue({
+      downloadThumbnailBytes: 0,
+      editorWorkingBytes: 0,
+      editorThumbnailBytes: 0,
+      editorPreviewBytes: 0,
+      stitchingThumbnailBytes: 0,
+      totalBytes: 0
+    });
+    clearAppCache.mockResolvedValue({
+      downloadThumbnailBytes: 0,
+      editorWorkingBytes: 0,
+      editorThumbnailBytes: 0,
+      editorPreviewBytes: 0,
+      stitchingThumbnailBytes: 0,
+      totalBytes: 0
+    });
   });
 
   it('renders the redesign shell with image editor selected by default', async () => {

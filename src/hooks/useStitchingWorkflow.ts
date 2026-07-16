@@ -30,7 +30,7 @@ export const useStitchingWorkflow = () => {
   const [selectedTemplate, setSelectedTemplate] = useState<LayoutTemplate | null>(layoutTemplates[4][0]);
   const [canvasRatio, setCanvasRatio] = useState<CanvasRatio>('1:1');
   const [images, setImages] = useState<Array<StitchingCanvasImage | null>>([]);
-  const [outputDirectory, setOutputDirectory] = useState('');
+  const [lastOutputDirectory, setLastOutputDirectory] = useState<string | null>(null);
   const [padding, setPadding] = useState(0);
   const [spacing, setSpacing] = useState(0);
   const [borderRadius, setBorderRadius] = useState(0);
@@ -38,7 +38,6 @@ export const useStitchingWorkflow = () => {
   const [resolution, setResolution] = useState<StitchingResolution>(1080);
   const [isRunning, setIsRunning] = useState(false);
   const [pageError, setPageError] = useState<string | null>(null);
-  const [lastOutputPath, setLastOutputPath] = useState<string | null>(null);
 
   const visibleImages = useMemo(() => images.map((image) => image ?? undefined), [images]);
   const canStart = Boolean(selectedTemplate) && filledImageCount(images) >= 2 && !isRunning;
@@ -65,7 +64,6 @@ export const useStitchingWorkflow = () => {
   const importInspections = async (sources: { files: string[]; directories: string[]; cancelled: boolean }) => {
     if (sources.cancelled || isRunning) return;
     setPageError(null);
-    setLastOutputPath(null);
 
     const filePromises = sources.files.map(async (path) => {
       try {
@@ -135,7 +133,6 @@ export const useStitchingWorkflow = () => {
   const selectTemplate = (template: LayoutTemplate) => {
     setSelectedTemplate(template);
     setImages((current) => current.slice(0, template.imageCount));
-    setLastOutputPath(null);
   };
 
   const removeImage = (cellIndex: number) => {
@@ -145,14 +142,12 @@ export const useStitchingWorkflow = () => {
       next[cellIndex] = null;
       return next;
     });
-    setLastOutputPath(null);
   };
 
   const clearImages = () => {
     if (isRunning) return;
     setImages([]);
     setPageError(null);
-    setLastOutputPath(null);
   };
 
   // 交换两个方格内的图片位置（拖拽移动）。
@@ -165,7 +160,6 @@ export const useStitchingWorkflow = () => {
       next[toIndex] = temp;
       return next;
     });
-    setLastOutputPath(null);
   };
 
   // 调整某个方格内图片的缩放与位移（编辑模式）。
@@ -182,7 +176,6 @@ export const useStitchingWorkflow = () => {
       next[cellIndex] = { ...target, scale, offsetX, offsetY };
       return next;
     });
-    setLastOutputPath(null);
   };
 
   // 将某个方格内图片恢复默认缩放与位移。
@@ -195,11 +188,17 @@ export const useStitchingWorkflow = () => {
       next[cellIndex] = { ...target, scale: 1, offsetX: 0, offsetY: 0 };
       return next;
     });
-    setLastOutputPath(null);
   };
 
   const openOutputDirectory = async () => {
-    if (outputDirectory) await openDirectoryInSystem(outputDirectory);
+    if (!lastOutputDirectory) return;
+
+    setPageError(null);
+    try {
+      await openDirectoryInSystem(lastOutputDirectory);
+    } catch (error) {
+      setPageError(toErrorMessage(error));
+    }
   };
 
   const startStitching = async (copyErrors: { outputDirectoryRequired: string; notEnoughImages: string; templateRequired: string }) => {
@@ -211,7 +210,7 @@ export const useStitchingWorkflow = () => {
     const { namingPattern, outputFormat, colorMode, quality } = settings.exportSettings;
 
     // 输出目录由全局策略决定：same-as-source 从首张图片所在目录推断；custom 使用设置页保存的固定默认目录。
-    let targetDirectory = outputDirectory;
+    let targetDirectory = '';
     if (settings.outputDirectoryStrategy === 'same-as-source') {
       const firstImage = images.find((image): image is StitchingCanvasImage => Boolean(image));
       if (firstImage) {
@@ -225,7 +224,6 @@ export const useStitchingWorkflow = () => {
 
     setIsRunning(true);
     setPageError(null);
-    setLastOutputPath(null);
     try {
       const cells = selectedTemplate.cells.map((cell, index) => ({
         sourcePath: images[index]?.path ?? '',
@@ -253,7 +251,7 @@ export const useStitchingWorkflow = () => {
         outputFormat,
         namingPattern,
       });
-      setLastOutputPath(result.outputPath);
+      setLastOutputDirectory(sourceDirectory(result.outputPath));
     } catch (error) {
       setPageError(toErrorMessage(error));
     } finally {
@@ -264,7 +262,7 @@ export const useStitchingWorkflow = () => {
   return {
     selectedTemplate, canvasRatio, images: visibleImages,
     padding, spacing, borderRadius, backgroundColor, resolution,
-    isRunning, pageError, lastOutputPath, canStart, outputDirectory,
+    isRunning, pageError, lastOutputDirectory, canStart,
     setCanvasRatio, setPadding, setSpacing, setBorderRadius, setBackgroundColor, setResolution,
     selectTemplate,
     importImages, importImageForCell, removeImage, clearImages, openOutputDirectory, startStitching,

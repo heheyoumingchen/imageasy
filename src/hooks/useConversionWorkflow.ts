@@ -49,7 +49,9 @@ const buildImageConversionRequest = (item: ConversionItem, settings: ConversionB
     outputPath: joinOutputPath(settings.outputDirectory, outputName),
     outputFormat: settings.outputFormat,
     colorMode: settings.colorMode,
-    quality: settings.quality
+    quality: settings.quality,
+    // 仅当该项输出会替换源文件时授权覆盖；此时批次开始前已弹出统一确认。
+    allowSourceOverwrite: willOverwriteSource(item, settings)
   };
 };
 
@@ -61,11 +63,13 @@ const buildDocumentPagesForSettings = (item: ConversionItem, settings: Conversio
   const pageRangeMode = item.outputSettingsOverride.pageRangeMode ?? settings.pageRangeMode;
   const pageRangeText = item.outputSettingsOverride.pageRangeText ?? settings.pageRangeText;
 
+  // all 语义交给后端展开为全部页，前端一律发空列表；未知页数时也不在前端猜测总页数。
   if (pageRangeMode === 'all') {
-    return Array.from({ length: item.documentMetadata.pageCount }, (_, index) => index + 1);
+    return [];
   }
 
-  return expandPageRange(pageRangeText, item.documentMetadata.pageCount);
+  // 页数已知时用上界校验；未知（Office 文档）时只解析语法，交给后端在真实页数下再校验。
+  return expandPageRange(pageRangeText, item.documentMetadata.pageCount ?? undefined);
 };
 
 const getReadyConversionItems = (items: ConversionItem[]) => items.filter((item) => item.status === 'ready' && item.selected);
@@ -178,6 +182,7 @@ export const useConversionWorkflow = () => {
           outputDirectory: batchSettings.outputDirectory,
           outputFormat: batchSettings.outputFormat,
           colorMode: batchSettings.colorMode,
+          quality: batchSettings.quality,
           pageNumbers: buildDocumentPagesForSettings(item, batchSettings),
           renderDensity: batchSettings.renderDensity,
           namingPattern: batchSettings.namingPattern

@@ -3,4 +3,3 @@
 fn main() {
     imageasy_lib::run();
 }
-

@@ -141,7 +141,8 @@
   box-shadow: 0 2px 10px rgba(0, 0, 0, 0.3);
 }
 
-[data-theme='dark'] .hover\:bg-\[\#F8F9FB\]:hover {
+[data-theme='dark'] .hover\:bg-\[\#F8F9FB\]:hover,
+[data-theme='dark'] .hover\:bg-\[\#FAFBFD\]:hover {
   background-color: #2A2A2A;
 }
 

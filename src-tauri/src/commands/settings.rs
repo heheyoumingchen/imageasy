@@ -1,6 +1,9 @@
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
-use std::{fs, path::{Path, PathBuf}};
+use std::{
+    fs,
+    path::{Path, PathBuf},
+};
 
 // 四个功能（转换 / 提取 / 分割 / 拼接）现已共享同一份导出设置。
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -79,8 +82,11 @@ pub fn load_settings() -> Result<PersistedSettings, String> {
 
 #[tauri::command]
 pub fn save_settings(settings: PersistedSettings) -> Result<PersistedSettings, String> {
-    save_settings_to_path(&settings_path().map_err(|error| error.to_string())?, settings)
-        .map_err(|error| error.to_string())
+    save_settings_to_path(
+        &settings_path().map_err(|error| error.to_string())?,
+        settings,
+    )
+    .map_err(|error| error.to_string())
 }
 
 pub fn load_settings_from_path(path: &Path) -> Result<PersistedSettings> {
@@ -99,15 +105,17 @@ pub fn load_settings_from_path(path: &Path) -> Result<PersistedSettings> {
     Ok(settings)
 }
 
-pub fn save_settings_to_path(path: &Path, settings: PersistedSettings) -> Result<PersistedSettings> {
+pub fn save_settings_to_path(
+    path: &Path,
+    settings: PersistedSettings,
+) -> Result<PersistedSettings> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)
             .with_context(|| format!("无法创建设置目录: {}", parent.display()))?;
     }
 
     let raw = serde_json::to_string_pretty(&settings)?;
-    fs::write(path, raw)
-        .with_context(|| format!("无法写入设置文件: {}", path.display()))?;
+    fs::write(path, raw).with_context(|| format!("无法写入设置文件: {}", path.display()))?;
 
     Ok(settings)
 }

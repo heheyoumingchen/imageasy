@@ -1,6 +1,6 @@
 mod parser;
 
-pub use parser::{infer_format_from_source, parse_wechat_article_images, parse_webpage_images};
+pub use parser::{infer_format_from_source, parse_webpage_images, parse_wechat_article_images};
 
 use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
@@ -222,11 +222,20 @@ pub fn metadata_event_payload_for(item: &DownloadableImageItem) -> ImageDownload
     }
 }
 
-pub fn metadata_probe_candidates_for(items: &[DownloadableImageItem]) -> Vec<DownloadableImageItem> {
-    items.iter().take(MAX_METADATA_PROBE_ITEMS).cloned().collect()
+pub fn metadata_probe_candidates_for(
+    items: &[DownloadableImageItem],
+) -> Vec<DownloadableImageItem> {
+    items
+        .iter()
+        .take(MAX_METADATA_PROBE_ITEMS)
+        .cloned()
+        .collect()
 }
 
-fn probe_image_response_metadata(source_url: &str, page_url: &url::Url) -> Result<(Option<String>, Option<u64>)> {
+fn probe_image_response_metadata(
+    source_url: &str,
+    page_url: &url::Url,
+) -> Result<(Option<String>, Option<u64>)> {
     let response = fetch_head_response(source_url, Some(page_url), Duration::from_secs(5))?;
     let content_type = response.header("Content-Type").map(str::to_string);
     let content_length = response
@@ -245,16 +254,23 @@ fn spawn_metadata_probe(window: Window, page_url: url::Url, items: Vec<Downloada
             let worker_rx = std::sync::Arc::clone(&work_rx);
             let worker_window = window.clone();
             let worker_page_url = page_url.clone();
-            workers.push(std::thread::spawn(move || {
-                loop {
-                    let Ok(mut item) = worker_rx.lock().expect("metadata queue poisoned").recv() else {
-                        break;
-                    };
+            workers.push(std::thread::spawn(move || loop {
+                let Ok(mut item) = worker_rx.lock().expect("metadata queue poisoned").recv() else {
+                    break;
+                };
 
-                    if let Ok((content_type, content_length)) = probe_image_response_metadata(&item.source_url, &worker_page_url) {
-                        apply_image_response_metadata(&mut item, content_type.as_deref(), content_length);
-                        let _ = worker_window.emit(IMAGE_DOWNLOAD_METADATA_EVENT, metadata_event_payload_for(&item));
-                    }
+                if let Ok((content_type, content_length)) =
+                    probe_image_response_metadata(&item.source_url, &worker_page_url)
+                {
+                    apply_image_response_metadata(
+                        &mut item,
+                        content_type.as_deref(),
+                        content_length,
+                    );
+                    let _ = worker_window.emit(
+                        IMAGE_DOWNLOAD_METADATA_EVENT,
+                        metadata_event_payload_for(&item),
+                    );
                 }
             }));
         }
@@ -283,7 +299,10 @@ fn is_windows_reserved_name(stem: &str) -> bool {
 }
 
 pub fn build_safe_output_name(source_name: &str, extension: &str, index: usize) -> String {
-    let base = source_name.rsplit_once('.').map(|(stem, _)| stem).unwrap_or(source_name);
+    let base = source_name
+        .rsplit_once('.')
+        .map(|(stem, _)| stem)
+        .unwrap_or(source_name);
     let cleaned: String = base
         .chars()
         .map(|c| match c {
@@ -318,7 +337,11 @@ fn create_unique_output_file(dir: &Path, file_name: &str) -> Result<(PathBuf, Fi
             format!("{}-{}{}", stem, suffix, ext)
         };
         let candidate = dir.join(candidate_name);
-        match OpenOptions::new().write(true).create_new(true).open(&candidate) {
+        match OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&candidate)
+        {
             Ok(file) => return Ok((candidate, file)),
             Err(error) if error.kind() == ErrorKind::AlreadyExists => continue,
             Err(error) => return Err(error).context("无法写入文件"),
@@ -344,7 +367,11 @@ pub fn inspect_download_source_from_html(
     Ok(InspectDownloadSourceResult { page_title, images })
 }
 
-fn fetch_response(url: &str, referer: Option<&url::Url>, timeout: Duration) -> Result<ureq::Response> {
+fn fetch_response(
+    url: &str,
+    referer: Option<&url::Url>,
+    timeout: Duration,
+) -> Result<ureq::Response> {
     let agent = ureq::AgentBuilder::new()
         .redirects(0)
         .timeout(timeout)
@@ -376,7 +403,11 @@ fn fetch_response(url: &str, referer: Option<&url::Url>, timeout: Duration) -> R
     bail!("重定向次数过多")
 }
 
-fn fetch_head_response(url: &str, referer: Option<&url::Url>, timeout: Duration) -> Result<ureq::Response> {
+fn fetch_head_response(
+    url: &str,
+    referer: Option<&url::Url>,
+    timeout: Duration,
+) -> Result<ureq::Response> {
     let agent = ureq::AgentBuilder::new()
         .redirects(0)
         .timeout(timeout)
@@ -413,7 +444,11 @@ fn fetch_html(url: &str) -> Result<String> {
     response.into_string().context("无法读取页面内容")
 }
 
-pub fn infer_download_extension(content_type: Option<&str>, bytes: &[u8], source_name: &str) -> String {
+pub fn infer_download_extension(
+    content_type: Option<&str>,
+    bytes: &[u8],
+    source_name: &str,
+) -> String {
     if let Some(content_type) = content_type {
         match content_type.split(';').next().unwrap_or_default().trim() {
             "image/jpeg" => return "jpg".into(),
@@ -535,4 +570,3 @@ pub async fn save_download_images(
 ) -> Result<SaveDownloadImagesResult, String> {
     save_download_images_impl(request).map_err(|error| error.to_string())
 }
-

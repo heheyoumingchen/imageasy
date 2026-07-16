@@ -21,4 +21,3 @@ fn clear_directory_contents_removes_children_but_keeps_directory() {
     assert!(dir.path().is_dir());
     assert!(!dir.path().join("a.bin").exists());
 }
-

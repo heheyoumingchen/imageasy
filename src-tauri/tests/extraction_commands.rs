@@ -1,22 +1,29 @@
-use std::io::Write;
-use std::{fs, path::PathBuf};
 use image::{codecs::jpeg::JpegEncoder, ColorType};
 use lopdf::Document as LoDocument;
+use std::io::Write;
+use std::{fs, path::PathBuf};
 use tempfile::tempdir;
 
 use imageasy_lib::commands::extraction::{
-    extract_document_images, inspect_extraction_directory, inspect_extraction_document, ExtractDocumentImagesRequest,
+    extract_document_images, inspect_extraction_directory, inspect_extraction_document,
+    ExtractDocumentImagesRequest,
 };
 
-fn run_extract_document_images(request: ExtractDocumentImagesRequest) -> Result<imageasy_lib::commands::extraction::ExtractDocumentImagesResult, String> {
+fn run_extract_document_images(
+    request: ExtractDocumentImagesRequest,
+) -> Result<imageasy_lib::commands::extraction::ExtractDocumentImagesResult, String> {
     tauri::async_runtime::block_on(extract_document_images(request))
 }
 
-fn run_inspect_extraction_document(path: String) -> Result<imageasy_lib::commands::extraction::ExtractionDocumentInfo, String> {
+fn run_inspect_extraction_document(
+    path: String,
+) -> Result<imageasy_lib::commands::extraction::ExtractionDocumentInfo, String> {
     tauri::async_runtime::block_on(inspect_extraction_document(path))
 }
 
-fn run_inspect_extraction_directory(path: String) -> Result<Vec<imageasy_lib::commands::extraction::ExtractionDocumentInfo>, String> {
+fn run_inspect_extraction_directory(
+    path: String,
+) -> Result<Vec<imageasy_lib::commands::extraction::ExtractionDocumentInfo>, String> {
     tauri::async_runtime::block_on(inspect_extraction_directory(path))
 }
 
@@ -178,7 +185,8 @@ fn inspect_extraction_directory_recursively_collects_supported_documents() {
     fs::write(nested.join("manual.docx"), b"fake-docx").unwrap();
     fs::write(nested.join("notes.txt"), b"unsupported").unwrap();
 
-    let result = run_inspect_extraction_directory(dir.path().to_string_lossy().into_owned()).unwrap();
+    let result =
+        run_inspect_extraction_directory(dir.path().to_string_lossy().into_owned()).unwrap();
 
     assert_eq!(result.len(), 2);
     assert_eq!(result[0].source_name, "demo.pdf");
@@ -211,7 +219,10 @@ fn extract_document_images_writes_output_files_from_image_sources() {
     assert_eq!(result.output_paths.len(), 1);
 
     let output_path = PathBuf::from(&result.output_paths[0]);
-    assert_eq!(output_path.file_name().unwrap().to_string_lossy(), "photo-001.jpg");
+    assert_eq!(
+        output_path.file_name().unwrap().to_string_lossy(),
+        "photo-001.jpg"
+    );
     assert!(output_path.exists());
 }
 
@@ -237,7 +248,10 @@ fn extract_document_images_extracts_embedded_images_from_pdf() {
     assert_eq!(result.output_paths.len(), 1);
 
     let output_path = PathBuf::from(&result.output_paths[0]);
-    assert_eq!(output_path.file_name().unwrap().to_string_lossy(), "demo-001.jpg");
+    assert_eq!(
+        output_path.file_name().unwrap().to_string_lossy(),
+        "demo-001.jpg"
+    );
     assert!(output_path.exists());
 
     let image = image::open(&output_path).unwrap();
@@ -251,7 +265,8 @@ fn inspect_and_extract_return_zero_for_pdf_without_embedded_images() {
     let source = dir.path().join("empty.pdf");
     write_minimal_empty_pdf(&source);
 
-    let inspect_result = run_inspect_extraction_document(source.to_string_lossy().into_owned()).unwrap();
+    let inspect_result =
+        run_inspect_extraction_document(source.to_string_lossy().into_owned()).unwrap();
     assert_eq!(inspect_result.page_count, 0);
     assert_eq!(inspect_result.embedded_image_count, 0);
 
@@ -289,7 +304,10 @@ fn extract_document_images_extracts_docx_without_soffice() {
 
     assert_eq!(result.extracted_count, 1);
     let output_path = PathBuf::from(&result.output_paths[0]);
-    assert_eq!(output_path.file_name().unwrap().to_string_lossy(), "demo-001.jpg");
+    assert_eq!(
+        output_path.file_name().unwrap().to_string_lossy(),
+        "demo-001.jpg"
+    );
     assert!(output_path.exists());
 }
 
@@ -316,7 +334,10 @@ fn extract_document_images_extracts_pptx_original_images_without_recoloring() {
 
     assert_eq!(result.extracted_count, 1);
     let output_path = PathBuf::from(&result.output_paths[0]);
-    assert_eq!(output_path.file_name().unwrap().to_string_lossy(), "slides-001.png");
+    assert_eq!(
+        output_path.file_name().unwrap().to_string_lossy(),
+        "slides-001.png"
+    );
     let image = image::open(output_path).unwrap().to_rgba8();
     assert_eq!(image.get_pixel(0, 0).0, [255, 0, 0, 255]);
 }
@@ -356,7 +377,11 @@ fn extract_document_images_returns_zero_for_docx_without_images() {
     fs::write(root.join("[Content_Types].xml"), b"<Types></Types>").unwrap();
     fs::write(root.join("_rels/.rels"), b"<Relationships></Relationships>").unwrap();
     fs::write(root.join("word/document.xml"), b"<w:document></w:document>").unwrap();
-    fs::write(root.join("word/_rels/document.xml.rels"), b"<Relationships></Relationships>").unwrap();
+    fs::write(
+        root.join("word/_rels/document.xml.rels"),
+        b"<Relationships></Relationships>",
+    )
+    .unwrap();
     write_zip_from_dir(root, &source);
 
     let result = run_extract_document_images(ExtractDocumentImagesRequest {
@@ -373,4 +398,3 @@ fn extract_document_images_returns_zero_for_docx_without_images() {
     assert_eq!(result.extracted_count, 0);
     assert!(result.output_paths.is_empty());
 }
-
