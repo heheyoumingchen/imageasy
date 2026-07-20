@@ -4,12 +4,15 @@ use std::future::Future;
 use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::pin::Pin;
+use std::time::Instant;
 
 use tauri::Runtime;
 
+use super::bridge_cache::{store_bridge, try_clone_cached_bridge};
 use super::error::{CommandError, CommandErrorCode, DocumentRendererKind, RendererStage};
 use super::helper_client::run_helper;
 use super::protocol::{HelperOperation, HelperRequest, PROTOCOL_VERSION};
+use super::timing::log_stage_timing;
 
 static OFFICE_EXPORT_MUTEX: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 const BRIDGE_FILE_NAME: &str = "bridge.pdf";
@@ -109,9 +112,18 @@ async fn prepare_office_document<R: OfficeRenderer + ?Sized>(
     route: DocumentRoute,
     renderer: &R,
 ) -> Result<PreparedDocument, CommandError> {
+    // 同文件改格式/质量：命中进程内桥接 PDF 缓存则跳过 Office。
+    let cache_lookup = Instant::now();
+    if let Some((temp_dir, path)) = try_clone_cached_bridge(source)? {
+        log_stage_timing("bridge_cache_hit", cache_lookup.elapsed());
+        return Ok(private_bridge(temp_dir, path));
+    }
+    log_stage_timing("bridge_cache_miss", cache_lookup.elapsed());
+
     let temp_dir = tempfile::tempdir().map_err(bridge_io_error)?;
     let requested_output = temp_dir.path().join(BRIDGE_FILE_NAME);
     let _guard = OFFICE_EXPORT_MUTEX.lock().await;
+    let office_started = Instant::now();
 
     let actual_output = match route {
         DocumentRoute::WordThenWps => {
@@ -124,7 +136,12 @@ async fn prepare_office_document<R: OfficeRenderer + ?Sized>(
             )
             .await
             {
-                Ok(path) => return Ok(private_bridge(temp_dir, path)),
+                Ok(path) => {
+                    log_stage_timing("office_export", office_started.elapsed());
+                    // 缓存失败不影响本次成功路径。
+                    let _ = store_bridge(source, &path);
+                    return Ok(private_bridge(temp_dir, path));
+                }
                 Err(error) => error,
             };
             clear_bridge_output(&requested_output)?;
@@ -154,6 +171,8 @@ async fn prepare_office_document<R: OfficeRenderer + ?Sized>(
         DocumentRoute::Pdf => unreachable!("PDF bypasses Office preparation"),
     };
 
+    log_stage_timing("office_export", office_started.elapsed());
+    let _ = store_bridge(source, &actual_output);
     Ok(private_bridge(temp_dir, actual_output))
 }
 
@@ -219,24 +238,27 @@ fn validate_bridge(
 }
 
 fn combine_renderer_errors(word: &CommandError, wps: &CommandError) -> CommandError {
+    let word_summary = renderer_summary(word);
+    let wps_summary = renderer_summary(wps);
+    let diagnostic = format!("Word: {word_summary}; WPS: {wps_summary}");
+
     if matches!(word.code, CommandErrorCode::WordRendererNotAvailable)
         && matches!(wps.code, CommandErrorCode::WpsRendererNotAvailable)
     {
         return CommandError::new(
             CommandErrorCode::WordRendererNotAvailable,
-            "DOC/DOCX 转图片需要 Microsoft Word 或 WPS Office。PDF 转图片不受影响。",
+            "DOC/DOCX 转图片未能连接 Microsoft Word 或 WPS Office。请确认已安装且可手动打开文档，并允许本应用启动 Office；PDF 转图片不受影响。",
         )
-        .with_stage(RendererStage::Launch);
+        .with_stage(RendererStage::Launch)
+        .with_diagnostic(diagnostic);
     }
 
-    let word_summary = renderer_summary(word);
-    let wps_summary = renderer_summary(wps);
     CommandError::new(
         CommandErrorCode::DocumentRendererExportFailed,
         "Microsoft Word 和 WPS Office 均未能导出文档",
     )
     .with_stage(RendererStage::Exporting)
-    .with_diagnostic(format!("Word: {word_summary}; WPS: {wps_summary}"))
+    .with_diagnostic(diagnostic)
 }
 
 fn renderer_summary(error: &CommandError) -> String {

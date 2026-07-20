@@ -1,10 +1,13 @@
+pub mod cancellation;
 pub mod common;
 pub mod conversion;
 pub mod editor;
+pub mod error_message;
 pub mod extraction;
 mod image_codec;
 pub mod image_download;
 mod memory_budget;
+pub mod path_guard;
 pub mod pdf_rendering;
 pub mod settings;
 pub mod splitting;

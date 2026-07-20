@@ -2,6 +2,9 @@ use anyhow::{Context, Result};
 use image::{DynamicImage, GrayImage, RgbImage};
 use pdfium_render::prelude::*;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::Instant;
+use crate::document_renderer::timing::log_stage_timing;
 
 #[derive(Debug)]
 pub struct RenderedPdfPage {
@@ -400,30 +403,279 @@ pub fn render_pdf_document_with_callback<P, F>(
     render_density: &str,
     output_format: BitmapOutputFormat,
     plan_pages: P,
-    mut on_page: F,
+    on_page: F,
 ) -> Result<()>
 where
     P: FnOnce(u32) -> Result<Vec<u32>>,
     F: FnMut(RenderedPdfPage) -> Result<()>,
 {
+    render_pdf_document_with_callback_cancellable(
+        source_path,
+        resource_dir,
+        render_density,
+        output_format,
+        plan_pages,
+        on_page,
+        None,
+    )
+}
+
+/// 选择 PDF 页渲染并发度：1 页串行；2+ 页夹在 2..=4 之间，且不超过页数与可用并行度。
+pub fn pdf_render_thread_count(page_count: usize) -> usize {
+    if page_count <= 1 {
+        return 1;
+    }
+    let cpu = std::thread::available_parallelism()
+        .map(|value| value.get())
+        .unwrap_or(2)
+        .clamp(2, 4);
+    cpu.min(page_count).max(2)
+}
+
+pub fn render_pdf_document_with_callback_cancellable<P, F>(
+    source_path: &Path,
+    resource_dir: Option<&Path>,
+    render_density: &str,
+    output_format: BitmapOutputFormat,
+    plan_pages: P,
+    mut on_page: F,
+    cancel: Option<&crate::commands::cancellation::CancellationToken>,
+) -> Result<()>
+where
+    P: FnOnce(u32) -> Result<Vec<u32>>,
+    F: FnMut(RenderedPdfPage) -> Result<()>,
+{
+    crate::commands::cancellation::check_optional(cancel)?;
+    let plan_started = Instant::now();
     let pdfium = bind_pdfium(resource_dir)?;
     let document = pdfium
         .load_pdf_from_file(source_path, None)
         .with_context(|| format!("无法渲染 PDF 文档: {}", source_path.display()))?;
     let total_pages = document.pages().len() as u32;
     let selected_pages = plan_pages(total_pages)?;
-    let target_width = if render_density == "high" { 2480 } else { 1240 };
+    log_stage_timing("pdf_plan", plan_started.elapsed());
 
-    for page_number in selected_pages {
-        let page_index = u16::try_from(page_number - 1).context("PDF 页码超过渲染器限制")?;
-        let page = document.pages().get(page_index)?;
-        let bitmap =
-            page.render_with_config(&PdfRenderConfig::new().set_target_width(target_width))?;
-        let image = convert_pdfium_bitmap(&bitmap, output_format)?;
-        drop(bitmap);
-        on_page(RenderedPdfPage { page_number, image })?;
+    if selected_pages.is_empty() {
+        return Ok(());
+    }
+
+    let target_width = if render_density == "high" { 2480 } else { 1240 };
+    let threads = pdf_render_thread_count(selected_pages.len());
+    let pipeline_started = Instant::now();
+    if threads == 1 {
+        // 单线程：复用已打开的 document，边渲染边回调，峰值仍约 1 页。
+        let render_config = build_render_config(target_width);
+        for &page_number in &selected_pages {
+            crate::commands::cancellation::check_optional(cancel)?;
+            let page = render_one_page(&document, page_number, &render_config, output_format)?;
+            on_page(page)?;
+        }
+        drop(document);
+        drop(pdfium);
+    } else {
+        // 并行：先释放本线程 document，各 worker 独立 bind/load。
+        drop(document);
+        drop(pdfium);
+        render_pdf_pages_parallel_streaming(
+            source_path,
+            resource_dir,
+            &selected_pages,
+            target_width,
+            output_format,
+            threads,
+            cancel,
+            &mut on_page,
+        )?;
+    }
+    log_stage_timing(
+        &format!(
+            "pdf_rasterize_encode pages={} threads={}",
+            selected_pages.len(),
+            threads
+        ),
+        pipeline_started.elapsed(),
+    );
+    Ok(())
+}
+
+fn build_render_config(target_width: i32) -> PdfRenderConfig {
+    // pdfium-render 默认 reverse_byte_order=true 会把缓冲写成 RGB 序，但 format 仍报 BGRA；
+    // 我们下游按 BGR 解析，必须显式关闭 reverse，否则红蓝通道对调。
+    // LCD 文本渲染显著改善小字边缘与颜色观感。
+    PdfRenderConfig::new()
+        .set_target_width(target_width)
+        .set_reverse_byte_order(false)
+        .use_lcd_text_rendering(true)
+        .clear_before_rendering(true)
+        .set_clear_color(PdfColor::WHITE)
+}
+
+/// 并行渲染：worker 完成即送入 channel；主线程按选择顺序回调，避免攒齐所有页。
+fn render_pdf_pages_parallel_streaming<F>(
+    source_path: &Path,
+    resource_dir: Option<&Path>,
+    selected_pages: &[u32],
+    target_width: i32,
+    output_format: BitmapOutputFormat,
+    threads: usize,
+    cancel: Option<&crate::commands::cancellation::CancellationToken>,
+    on_page: &mut F,
+) -> Result<()>
+where
+    F: FnMut(RenderedPdfPage) -> Result<()>,
+{
+    let source_path = source_path.to_path_buf();
+    let resource_dir = resource_dir.map(Path::to_path_buf);
+    let cancel_flag = cancel.map(|token| token.clone());
+    let chunks = split_pages_for_workers(selected_pages, threads);
+    let failed = std::sync::Arc::new(AtomicBool::new(false));
+    let (tx, rx) = std::sync::mpsc::channel::<Result<RenderedPdfPage>>();
+    let mut handles = Vec::with_capacity(chunks.len());
+
+    for chunk in chunks {
+        let source_path = source_path.clone();
+        let resource_dir = resource_dir.clone();
+        let cancel_flag = cancel_flag.clone();
+        let failed = failed.clone();
+        let tx = tx.clone();
+        handles.push(std::thread::spawn(move || {
+            if failed.load(Ordering::Relaxed) {
+                return;
+            }
+            if let Some(token) = cancel_flag.as_ref() {
+                if let Err(error) = token.check() {
+                    failed.store(true, Ordering::Relaxed);
+                    let _ = tx.send(Err(error));
+                    return;
+                }
+            }
+            let pdfium = match bind_pdfium(resource_dir.as_deref()) {
+                Ok(pdfium) => pdfium,
+                Err(error) => {
+                    failed.store(true, Ordering::Relaxed);
+                    let _ = tx.send(Err(error));
+                    return;
+                }
+            };
+            let document = match pdfium.load_pdf_from_file(&source_path, None) {
+                Ok(document) => document,
+                Err(error) => {
+                    failed.store(true, Ordering::Relaxed);
+                    let _ = tx.send(Err(anyhow::anyhow!(
+                        "无法渲染 PDF 文档: {}: {error}",
+                        source_path.display()
+                    )));
+                    return;
+                }
+            };
+            let render_config = build_render_config(target_width);
+            for page_number in chunk {
+                if failed.load(Ordering::Relaxed) {
+                    return;
+                }
+                if let Some(token) = cancel_flag.as_ref() {
+                    if let Err(error) = token.check() {
+                        failed.store(true, Ordering::Relaxed);
+                        let _ = tx.send(Err(error));
+                        return;
+                    }
+                }
+                match render_one_page(&document, page_number, &render_config, output_format) {
+                    Ok(page) => {
+                        if tx.send(Ok(page)).is_err() {
+                            failed.store(true, Ordering::Relaxed);
+                            return;
+                        }
+                    }
+                    Err(error) => {
+                        failed.store(true, Ordering::Relaxed);
+                        let _ = tx.send(Err(error));
+                        return;
+                    }
+                }
+            }
+        }));
+    }
+    drop(tx);
+
+    let order: std::collections::HashMap<u32, usize> = selected_pages
+        .iter()
+        .enumerate()
+        .map(|(index, page)| (*page, index))
+        .collect();
+    let mut pending: std::collections::HashMap<usize, RenderedPdfPage> =
+        std::collections::HashMap::new();
+    let mut next_index = 0usize;
+    let mut received = 0usize;
+    let total = selected_pages.len();
+    let mut first_error: Option<anyhow::Error> = None;
+
+    while received < total {
+        match rx.recv() {
+            Ok(Ok(page)) => {
+                received += 1;
+                let Some(&index) = order.get(&page.page_number) else {
+                    failed.store(true, Ordering::Relaxed);
+                    first_error =
+                        Some(anyhow::anyhow!("PDF 渲染器返回了未规划的页面 {}", page.page_number));
+                    break;
+                };
+                pending.insert(index, page);
+                while let Some(ready) = pending.remove(&next_index) {
+                    if let Err(error) = on_page(ready) {
+                        failed.store(true, Ordering::Relaxed);
+                        first_error = Some(error);
+                        break;
+                    }
+                    next_index += 1;
+                }
+                if first_error.is_some() {
+                    break;
+                }
+            }
+            Ok(Err(error)) => {
+                failed.store(true, Ordering::Relaxed);
+                first_error = Some(error);
+                break;
+            }
+            Err(_) => break,
+        }
+    }
+
+    for handle in handles {
+        let _ = handle.join();
+    }
+
+    if let Some(error) = first_error {
+        return Err(error);
+    }
+    if next_index != total {
+        anyhow::bail!("PDF 并行渲染未完成全部页面: {next_index}/{total}");
     }
     Ok(())
+}
+
+fn render_one_page(
+    document: &PdfDocument<'_>,
+    page_number: u32,
+    render_config: &PdfRenderConfig,
+    output_format: BitmapOutputFormat,
+) -> Result<RenderedPdfPage> {
+    let page_index = u16::try_from(page_number - 1).context("PDF 页码超过渲染器限制")?;
+    let page = document.pages().get(page_index)?;
+    let bitmap = page.render_with_config(render_config)?;
+    let image = convert_pdfium_bitmap(&bitmap, output_format)?;
+    drop(bitmap);
+    Ok(RenderedPdfPage { page_number, image })
+}
+
+fn split_pages_for_workers(pages: &[u32], threads: usize) -> Vec<Vec<u32>> {
+    let threads = threads.max(1).min(pages.len().max(1));
+    let mut chunks = vec![Vec::new(); threads];
+    for (index, page) in pages.iter().copied().enumerate() {
+        chunks[index % threads].push(page);
+    }
+    chunks.into_iter().filter(|chunk| !chunk.is_empty()).collect()
 }
 
 pub fn render_pdf_pages_with_callback<F>(
@@ -443,6 +695,7 @@ where
         render_density,
         BitmapOutputFormat::Rgb,
         on_page,
+        None,
     )
 }
 
@@ -453,17 +706,19 @@ pub fn render_pdf_pages_with_format<F>(
     render_density: &str,
     output_format: BitmapOutputFormat,
     on_page: F,
+    cancel: Option<&crate::commands::cancellation::CancellationToken>,
 ) -> Result<()>
 where
     F: FnMut(RenderedPdfPage) -> Result<()>,
 {
-    render_pdf_document_with_callback(
+    render_pdf_document_with_callback_cancellable(
         source_path,
         resource_dir,
         render_density,
         output_format,
         |total_pages| selected_pdf_pages(total_pages, page_numbers),
         on_page,
+        cancel,
     )
 }
 
@@ -490,13 +745,33 @@ pub fn render_pdf_pages(
 #[cfg(test)]
 mod tests {
     use super::{
-        convert_bitmap_view, pdfium_candidate_paths_for_test, pdfium_unavailable_message_for_test,
-        run_pdf_page_pipeline, BitmapOutputFormat, BitmapPixelFormat, BitmapView,
+        convert_bitmap_view, pdf_render_thread_count, pdfium_candidate_paths_for_test,
+        pdfium_unavailable_message_for_test, run_pdf_page_pipeline, split_pages_for_workers,
+        BitmapOutputFormat, BitmapPixelFormat, BitmapView,
     };
     use anyhow::Result;
     use image::DynamicImage;
     use std::{cell::Cell, fs, path::PathBuf, rc::Rc};
     use tempfile::tempdir;
+
+    #[test]
+    fn pdf_render_thread_count_clamps_to_two_through_four() {
+        assert_eq!(pdf_render_thread_count(0), 1);
+        assert_eq!(pdf_render_thread_count(1), 1);
+        assert_eq!(pdf_render_thread_count(2), 2);
+        let for_many = pdf_render_thread_count(16);
+        assert!((2..=4).contains(&for_many));
+    }
+
+    #[test]
+    fn split_pages_for_workers_round_robins_and_preserves_all_pages() {
+        let pages = vec![1, 2, 3, 4, 5];
+        let chunks = split_pages_for_workers(&pages, 3);
+        assert_eq!(chunks.len(), 3);
+        let mut flattened: Vec<u32> = chunks.into_iter().flatten().collect();
+        flattened.sort_unstable();
+        assert_eq!(flattened, pages);
+    }
 
     #[test]
     fn windows_pdfium_candidates_include_resource_exe_and_subdir_layouts() {
@@ -619,6 +894,120 @@ mod tests {
         fn drop(&mut self) {
             self.alive.set(false);
         }
+    }
+
+    /// 生成 PDFium 可渲染的空白多页 PDF（非嵌入图提取用的残缺 PDF）。
+    fn write_blank_multipage_pdf(path: &std::path::Path, page_count: u32) {
+        assert!(page_count >= 1);
+        let mut objects: Vec<Vec<u8>> = Vec::new();
+        // 1: Catalog, 2: Pages, then pages + contents pairs.
+        let pages_kids: String = (0..page_count)
+            .map(|index| format!("{} 0 R", 3 + index * 2))
+            .collect::<Vec<_>>()
+            .join(" ");
+        objects.push(
+            b"1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n".to_vec(),
+        );
+        objects.push(
+            format!(
+                "2 0 obj\n<< /Type /Pages /Kids [{pages_kids}] /Count {page_count} >>\nendobj\n"
+            )
+            .into_bytes(),
+        );
+        for index in 0..page_count {
+            let page_id = 3 + index * 2;
+            let content_id = page_id + 1;
+            // 每页一点不同的填充灰阶，便于确认各页确实渲染。
+            let gray = 0.2 + 0.15 * f64::from(index);
+            let stream = format!("q\n{gray:.2} g\n0 0 200 200 re\nf\nQ\n");
+            objects.push(
+                format!(
+                    "{page_id} 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] /Contents {content_id} 0 R >>\nendobj\n"
+                )
+                .into_bytes(),
+            );
+            objects.push(
+                format!(
+                    "{content_id} 0 obj\n<< /Length {} >>\nstream\n{stream}endstream\nendobj\n",
+                    stream.len()
+                )
+                .into_bytes(),
+            );
+        }
+
+        let mut content = b"%PDF-1.4\n".to_vec();
+        let mut offsets = vec![0usize];
+        for object in &objects {
+            offsets.push(content.len());
+            content.extend_from_slice(object);
+        }
+        let xref_start = content.len();
+        let size = objects.len() + 1;
+        content.extend_from_slice(format!("xref\n0 {size}\n").as_bytes());
+        content.extend_from_slice(b"0000000000 65535 f \n");
+        for offset in offsets.iter().skip(1) {
+            content.extend_from_slice(format!("{offset:010} 00000 n \n").as_bytes());
+        }
+        content.extend_from_slice(
+            format!("trailer\n<< /Size {size} /Root 1 0 R >>\nstartxref\n").as_bytes(),
+        );
+        content.extend_from_slice(xref_start.to_string().as_bytes());
+        content.extend_from_slice(b"\n%%EOF\n");
+        fs::write(path, content).unwrap();
+    }
+
+    fn test_pdfium_resource_dir() -> Option<PathBuf> {
+        let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let dll = manifest.join("pdfium").join(if cfg!(windows) {
+            "pdfium.dll"
+        } else if cfg!(target_os = "macos") {
+            "libpdfium.dylib"
+        } else {
+            "libpdfium.so"
+        });
+        dll.is_file().then_some(manifest)
+    }
+
+    #[test]
+    fn pdfium_parallel_render_emits_ordered_pages_for_multipage_pdf() {
+        let Some(resource_dir) = test_pdfium_resource_dir() else {
+            eprintln!("skip pdfium_parallel_render: bundled pdfium runtime not found");
+            return;
+        };
+        let dir = tempdir().unwrap();
+        let source = dir.path().join("multi.pdf");
+        write_blank_multipage_pdf(&source, 4);
+
+        assert_eq!(
+            super::count_pdf_pages(&source, Some(resource_dir.as_path())).unwrap(),
+            4
+        );
+        let threads = pdf_render_thread_count(4);
+        assert!(
+            (2..=4).contains(&threads),
+            "4 pages should use 2-4 worker threads, got {threads}"
+        );
+
+        let mut pages = Vec::new();
+        super::render_pdf_document_with_callback(
+            &source,
+            Some(resource_dir.as_path()),
+            "standard",
+            BitmapOutputFormat::Rgb,
+            |total| {
+                assert_eq!(total, 4);
+                Ok(vec![1, 2, 3, 4])
+            },
+            |page| {
+                pages.push(page.page_number);
+                assert!(page.image.width() > 0);
+                assert!(page.image.height() > 0);
+                Ok(())
+            },
+        )
+        .expect("multipage PDFium render should succeed with bundled runtime");
+
+        assert_eq!(pages, vec![1, 2, 3, 4]);
     }
 
     #[test]

@@ -33,6 +33,9 @@ pub fn run() {
             commands::system::get_app_cache_usage,
             commands::system::clear_app_cache,
             commands::system::open_directory_in_system,
+            commands::cancellation::register_batch_task,
+            commands::cancellation::cancel_batch_task,
+            commands::cancellation::complete_batch_task,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

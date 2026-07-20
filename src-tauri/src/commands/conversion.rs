@@ -1,4 +1,5 @@
 use super::{
+    cancellation::{self, CancellationToken, TaskGuard},
     common::{
         apply_color_mode, copy_file_atomically, current_date_stamp, extension, normalized_format,
         write_dynamic_image,
@@ -8,20 +9,24 @@ use super::{
         ImageConversionOperation, ImageConversionPlan, SourceImageInfo, SourcePixelFormat,
     },
     memory_budget::process_memory_budget,
+    path_guard::{ensure_output_directory, ensure_output_file_path, require_existing_file},
     pdf_rendering::{
-        count_pdf_pages, render_pdf_document_with_callback, BitmapOutputFormat, RenderedPdfPage,
+        count_pdf_pages, render_pdf_document_with_callback_cancellable, BitmapOutputFormat,
+        RenderedPdfPage,
     },
 };
 use crate::document_renderer::coordinator::{
     prepare_document, HelperOfficeRenderer, OfficeRenderer, PreparedDocument,
 };
 use crate::document_renderer::error::{CommandError, CommandErrorCode, RendererStage};
+use crate::document_renderer::timing::log_stage_timing;
 use anyhow::{Context, Result};
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::{
     fs,
     path::{Path, PathBuf},
+    time::Instant,
 };
 use tauri::Manager;
 use walkdir::WalkDir;
@@ -64,6 +69,9 @@ pub struct ConvertImageFileRequest {
     /// 仅当前端批次覆盖确认通过时为 true；后端据此授权“输出即源文件”的原地重编码。
     #[serde(default)]
     pub allow_source_overwrite: bool,
+    /// 批次取消令牌 id；缺省表示不可取消。
+    #[serde(default)]
+    pub task_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -77,6 +85,9 @@ pub struct RenderDocumentToImagesRequest {
     pub page_numbers: Vec<u32>,
     pub render_density: String,
     pub naming_pattern: String,
+    /// 批次取消令牌 id；缺省表示不可取消。
+    #[serde(default)]
+    pub task_id: Option<String>,
 }
 
 #[derive(Debug)]
@@ -128,16 +139,25 @@ fn estimate_document_render_memory(request: &RenderDocumentToImagesRequest) -> u
     } else {
         1_240u64
     };
-    // PDFium BGRA 页 + 最终 RGB/Luma 页 + 编码工作区；每次仅处理一页。
+    // PDFium BGRA 页 + 最终 RGB/Luma 页 + 编码工作区。
+    // 并行渲染最多 4 线程，峰值按并发页数估算。
     let height = width.saturating_mul(3).div_ceil(2);
     let final_channels = if matches!(request.color_mode.as_str(), "grayscale" | "gray-cmyk") {
         1
     } else {
         3
     };
-    width
+    let per_page = width
         .saturating_mul(height)
-        .saturating_mul(4 + final_channels + 1)
+        .saturating_mul(4 + final_channels + 1);
+    let selected = if request.page_numbers.is_empty() {
+        // 未知总页数时按 4 路并发峰值估算，避免并行路径内存低估。
+        4u64
+    } else {
+        request.page_numbers.len().min(4) as u64
+    };
+    let concurrent = selected.clamp(1, 4);
+    per_page.saturating_mul(concurrent)
 }
 
 fn output_format_extension(output_format: &str) -> String {
@@ -251,10 +271,10 @@ pub async fn inspect_conversion_file(
     let resource_dir = app.path().resource_dir().ok();
     tauri::async_runtime::spawn_blocking(move || {
         inspect_conversion_file_impl(&path, &mut pdf_page_counter(resource_dir.clone()))
-            .map_err(|error| error.to_string())
+            .map_err(crate::commands::error_message::to_user_error_string)
     })
     .await
-    .map_err(|error| error.to_string())?
+    .map_err(crate::commands::error_message::to_user_error_string)?
 }
 
 #[tauri::command]
@@ -265,10 +285,10 @@ pub async fn inspect_conversion_directory(
     let resource_dir = app.path().resource_dir().ok();
     tauri::async_runtime::spawn_blocking(move || {
         inspect_conversion_directory_impl(&path, resource_dir.clone())
-            .map_err(|error| error.to_string())
+            .map_err(crate::commands::error_message::to_user_error_string)
     })
     .await
-    .map_err(|error| error.to_string())?
+    .map_err(crate::commands::error_message::to_user_error_string)?
 }
 
 /// 真实 PDF 页数计数器：绑定 PDFium 读取页数。Office 文档不会走到这里。
@@ -280,7 +300,7 @@ fn pdf_page_counter(resource_dir: Option<PathBuf>) -> impl FnMut(&Path) -> Resul
 pub async fn convert_image_file(request: ConvertImageFileRequest) -> Result<Vec<String>, String> {
     convert_image_file_async(request)
         .await
-        .map_err(|error| error.to_string())
+        .map_err(crate::commands::error_message::to_user_error_string)
 }
 
 #[tauri::command]
@@ -288,9 +308,21 @@ pub async fn render_document_to_images(
     app: tauri::AppHandle,
     request: RenderDocumentToImagesRequest,
 ) -> std::result::Result<Vec<String>, CommandError> {
+    let total_started = Instant::now();
+    let _guard = TaskGuard::new(request.task_id.clone());
+    let token = cancellation::token_for(request.task_id.as_deref());
+    if let Err(error) = cancellation::check_optional(token.as_ref()) {
+        return Err(cancelled_command_error(error));
+    }
+
     let resource_dir = app.path().resource_dir().ok();
     let renderer = HelperOfficeRenderer::new(app);
+    let prepare_started = Instant::now();
     let job = prepare_document_render(request, &renderer).await?;
+    log_stage_timing("prepare_document", prepare_started.elapsed());
+    if let Err(error) = cancellation::check_optional(token.as_ref()) {
+        return Err(cancelled_command_error(error));
+    }
     let estimated_bytes = estimate_document_render_memory(&job.request);
     let permit = process_memory_budget()
         .acquire(estimated_bytes)
@@ -299,15 +331,20 @@ pub async fn render_document_to_images(
             CommandError::new(CommandErrorCode::InternalError, "无法获取文档转换内存许可")
                 .with_stage(RendererStage::Rasterizing)
         })?;
-    tauri::async_runtime::spawn_blocking(move || {
+    let result = tauri::async_runtime::spawn_blocking(move || {
         let _permit = permit;
-        execute_document_render_job(job, resource_dir)
+        let raster_started = Instant::now();
+        let result = execute_document_render_job(job, resource_dir, token);
+        log_stage_timing("execute_document_render", raster_started.elapsed());
+        result
     })
     .await
     .map_err(|_| {
         CommandError::new(CommandErrorCode::InternalError, "文档转换任务异常终止")
             .with_stage(RendererStage::Cleanup)
-    })?
+    })?;
+    log_stage_timing("render_document_total", total_started.elapsed());
+    result
 }
 
 /// PDF 走 `count_pages` 得到真实页数；Office（doc/docx/wps）返回 None，绝不探测。
@@ -365,18 +402,29 @@ where
     }
 
     if is_pdf(&source) {
-        let page_count =
-            count_pages(&source).with_context(|| format!("无法读取 PDF 页数: {path}"))?;
+        // 导入阶段读页数失败不整项拒绝：仍作为 document 入队（页数未知），
+        // 真正转换时再返回可诊断错误，避免用户看到“PDF 不支持”。
+        let (page_count, error_message) = match count_pages(&source) {
+            Ok(count) => (Some(count), None),
+            Err(error) => {
+                let redacted =
+                    crate::commands::error_message::to_user_error_string(error);
+                (
+                    None,
+                    Some(format!("已导入，但暂无法读取页数：{redacted}")),
+                )
+            }
+        };
         return Ok(InspectConversionFileResult {
             kind: "document".into(),
             source_path: path.into(),
             source_name,
             image_metadata: None,
             document_metadata: Some(DocumentMetadata {
-                page_count: Some(page_count),
+                page_count,
                 extension: extension(&source),
             }),
-            error_message: None,
+            error_message,
         });
     }
 
@@ -443,7 +491,7 @@ pub fn inspect_conversion_file_with_counter<C>(
 where
     C: FnMut(&Path) -> Result<u32>,
 {
-    inspect_conversion_file_impl(path, count_pages).map_err(|error| error.to_string())
+    inspect_conversion_file_impl(path, count_pages).map_err(crate::commands::error_message::to_user_error_string)
 }
 
 /// 测试用：以注入的 PDF 页数计数器扫描目录。
@@ -468,7 +516,7 @@ where
             inspect_conversion_file_impl(&candidate.to_string_lossy(), &mut count_pages)
         })
         .collect::<Result<Vec<_>>>()
-        .map_err(|error| error.to_string())?;
+        .map_err(crate::commands::error_message::to_user_error_string)?;
 
     items.sort_by(|left, right| left.source_name.cmp(&right.source_name));
     Ok(items)
@@ -514,13 +562,13 @@ const SUPPORTED_COLOR_MODES: [&str; 5] = ["rgb", "cmyk", "grayscale", "gray-cmyk
 fn validate_document_render_request(
     request: &RenderDocumentToImagesRequest,
 ) -> std::result::Result<(), CommandError> {
-    let source = PathBuf::from(&request.source_path);
-    if !source.is_file() {
-        return Err(document_command_error("源文档不存在或不是文件"));
-    }
+    let source = require_existing_file(Path::new(&request.source_path))
+        .map_err(|error| document_command_error(&error.to_string()))?;
     if !matches!(extension(&source).as_str(), "pdf" | "doc" | "docx" | "wps") {
         return Err(document_command_error("不支持的文档格式"));
     }
+    ensure_output_directory(Path::new(&request.output_directory))
+        .map_err(|error| document_command_error(&error.to_string()))?;
     let output_format = normalized_format(&request.output_format);
     if !SUPPORTED_OUTPUT_FORMATS.contains(&output_format.as_str()) {
         return Err(document_command_error("不支持的输出格式"));
@@ -540,7 +588,7 @@ fn validate_document_render_request(
     ) {
         return Err(document_command_error("不支持的输出命名规则"));
     }
-    if request.page_numbers.iter().any(|page| *page == 0) {
+    if request.page_numbers.contains(&0) {
         return Err(CommandError::new(
             CommandErrorCode::DocumentPageRangeInvalid,
             "页码必须为正整数",
@@ -556,17 +604,12 @@ fn document_command_error(message: &str) -> CommandError {
 }
 
 /// 后端权威校验：拒绝非法源、格式、色彩、质量。路径身份不信任前端。
+/// 调用方须先通过 `require_existing_file` 规范化 `source_path`。
 fn validate_conversion_request(
     request: &ConvertImageFileRequest,
     source_path: &Path,
     requested_output_format: &str,
 ) -> Result<()> {
-    let metadata = fs::metadata(source_path)
-        .with_context(|| format!("源文件不存在或无法访问: {}", request.source_path))?;
-    if !metadata.is_file() {
-        anyhow::bail!("源路径不是文件: {}", request.source_path);
-    }
-
     let source_ext = extension(source_path);
     if !SUPPORTED_IMAGE_EXTENSIONS.contains(&source_ext.as_str()) {
         anyhow::bail!("不支持的图片扩展名: {source_ext}");
@@ -591,8 +634,8 @@ fn validate_conversion_request(
 
 /// 阻塞阶段：校验 → 确认 JPEG、生成操作计划、估算峰值内存。
 fn plan_conversion_job(request: ConvertImageFileRequest) -> Result<ConversionJob> {
-    let source_path = PathBuf::from(&request.source_path);
-    let output_path = PathBuf::from(&request.output_path);
+    let source_path = require_existing_file(Path::new(&request.source_path))?;
+    let output_path = ensure_output_file_path(Path::new(&request.output_path))?;
     let requested_output_format = normalized_format(&request.output_format);
 
     validate_conversion_request(&request, &source_path, &requested_output_format)?;
@@ -644,13 +687,12 @@ fn plan_conversion_job(request: ConvertImageFileRequest) -> Result<ConversionJob
 /// 阻塞阶段：在已获得内存许可后执行复制或转码。
 fn execute_conversion_job(job: ConversionJob) -> Result<Vec<String>> {
     let ConversionJob { request, plan, .. } = job;
-    let source_path = PathBuf::from(&request.source_path);
+    let source_path = require_existing_file(Path::new(&request.source_path))?;
     let requested_output_format = normalized_format(&request.output_format);
     let is_jpeg_ext = matches!(extension(&source_path).as_str(), "jpg" | "jpeg");
 
     if let Some(parent) = plan.actual_output_path.parent() {
-        fs::create_dir_all(parent)
-            .with_context(|| format!("无法创建输出目录: {}", parent.display()))?;
+        ensure_output_directory(parent)?;
     }
 
     match plan.operation {
@@ -679,15 +721,22 @@ fn execute_conversion_job(job: ConversionJob) -> Result<Vec<String>> {
 
 /// 异步转换：规划 → 申请内存预算 → 携带许可在阻塞线程执行。
 async fn convert_image_file_async(request: ConvertImageFileRequest) -> Result<Vec<String>> {
+    let _guard = TaskGuard::new(request.task_id.clone());
+    let token = cancellation::token_for(request.task_id.as_deref());
+    cancellation::check_optional(token.as_ref())?;
+
     let job = tauri::async_runtime::spawn_blocking(move || plan_conversion_job(request))
         .await
         .context("规划转换任务失败")??;
 
+    cancellation::check_optional(token.as_ref())?;
     let permit = process_memory_budget().acquire(job.estimated_bytes).await?;
+    cancellation::check_optional(token.as_ref())?;
 
     tauri::async_runtime::spawn_blocking(move || {
         // 许可随作用域结束释放，确保执行期间独占估算的内存额度。
         let _permit = permit;
+        cancellation::check_optional(token.as_ref())?;
         execute_conversion_job(job)
     })
     .await
@@ -1138,6 +1187,7 @@ pub mod benchmarking {
             color_mode: scenario.color_mode.to_string(),
             quality: Some(scenario.quality),
             allow_source_overwrite: false,
+            task_id: None,
         };
 
         let sampler = PeakSampler::start();
@@ -1293,13 +1343,14 @@ where
 fn execute_document_render_job(
     job: DocumentRenderJob,
     resource_dir: Option<PathBuf>,
+    token: Option<CancellationToken>,
 ) -> std::result::Result<Vec<String>, CommandError> {
     let render_source = job.source_path().to_path_buf();
     let output_format = job.bitmap_output_format;
     let request = job.request;
     let transaction = std::cell::RefCell::new(None);
 
-    render_pdf_document_with_callback(
+    render_pdf_document_with_callback_cancellable(
         &render_source,
         resource_dir.as_deref(),
         &request.render_density,
@@ -1317,6 +1368,7 @@ fn execute_document_render_job(
                 .context("PDF 输出事务尚未初始化")?
                 .write_page(page)
         },
+        token.as_ref(),
     )
     .map_err(|error| document_pipeline_error(error, RendererStage::Rasterizing, &render_source))?;
 
@@ -1330,12 +1382,21 @@ fn execute_document_render_job(
     Ok(transaction.finish())
 }
 
+fn cancelled_command_error(error: anyhow::Error) -> CommandError {
+    CommandError::new(CommandErrorCode::InternalError, cancellation::CANCELLED_MESSAGE)
+        .with_stage(RendererStage::Cleanup)
+        .with_diagnostic(error.to_string())
+}
+
 fn document_pipeline_error(
     error: anyhow::Error,
     stage: RendererStage,
     source_path: &Path,
 ) -> CommandError {
     let raw = error.to_string();
+    if cancellation::is_cancelled_message(&raw) {
+        return cancelled_command_error(error);
+    }
     let code = if raw.contains("页码") {
         CommandErrorCode::DocumentPageRangeInvalid
     } else {
@@ -1394,6 +1455,7 @@ mod tests {
             page_numbers,
             render_density: "standard".into(),
             naming_pattern: "source-name-original".into(),
+            task_id: None,
         }
     }
 

@@ -8,6 +8,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use imageasy_lib::document_renderer::bridge_cache::clear_bridge_cache;
 use imageasy_lib::document_renderer::coordinator::{
     prepare_document, with_prepared_document, DocumentRoute, OfficeRenderer, PreparedDocument,
 };
@@ -439,4 +440,29 @@ async fn document_renderer_releases_mutex_before_downstream_consumption() {
 
     assert!(first.path().exists());
     assert!(second.path().exists());
+}
+
+#[tokio::test]
+async fn document_renderer_reuses_cached_bridge_when_source_unchanged() {
+    clear_bridge_cache();
+    let dir = tempfile::tempdir().unwrap();
+    let source = dir.path().join("cached-report.docx");
+    std::fs::write(&source, b"office-body-for-cache").unwrap();
+
+    // 只投递一次 Valid：第二次 prepare 必须走缓存，否则 FakeRenderer 会 panic。
+    let renderer = FakeRenderer::new([Outcome::Valid]);
+    let first = prepare_document(&source, &renderer).await.unwrap();
+    assert_eq!(renderer.calls(), vec![DocumentRendererKind::Word]);
+    let first_bytes = std::fs::read(first.path()).unwrap();
+    drop(first);
+
+    let second = prepare_document(&source, &renderer).await.unwrap();
+    assert_eq!(
+        renderer.calls(),
+        vec![DocumentRendererKind::Word],
+        "同文件二次转换应跳过 Office"
+    );
+    assert_eq!(std::fs::read(second.path()).unwrap(), first_bytes);
+    assert_eq!(second.path().file_name().unwrap(), "bridge.pdf");
+    clear_bridge_cache();
 }

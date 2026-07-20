@@ -10,7 +10,10 @@ use imageasy_lib::commands::conversion::{
     inspect_conversion_file_with_counter, prepare_document_render, ConvertImageFileRequest,
     InspectConversionFileResult, RenderDocumentToImagesRequest,
 };
-use imageasy_lib::commands::pdf_rendering::BitmapOutputFormat;
+use imageasy_lib::commands::pdf_rendering::{
+    count_pdf_pages, render_pdf_pages_with_callback, BitmapOutputFormat,
+};
+use imageasy_lib::document_renderer::bridge_cache::clear_bridge_cache;
 use imageasy_lib::document_renderer::coordinator::{OfficeRenderFuture, OfficeRenderer};
 use imageasy_lib::document_renderer::error::{
     CommandError, CommandErrorCode, DocumentRendererKind,
@@ -116,6 +119,35 @@ fn inspect_document_pdf_uses_injected_page_counter() {
     let metadata = result.document_metadata.unwrap();
     assert_eq!(metadata.page_count, Some(7));
     assert_eq!(metadata.extension, "pdf");
+    assert!(result.error_message.is_none());
+}
+
+#[test]
+fn inspect_document_pdf_keeps_document_kind_when_page_count_fails() {
+    let dir = tempdir().unwrap();
+    let source = dir.path().join("broken.pdf");
+    fs::write(&source, b"%PDF-not-readable").unwrap();
+
+    let mut failing_counter = |_path: &Path| -> anyhow::Result<u32> {
+        anyhow::bail!("无法读取 PDF 页数: mock failure")
+    };
+
+    let result =
+        inspect_conversion_file_with_counter(&source.to_string_lossy(), &mut failing_counter)
+            .unwrap();
+
+    assert_eq!(result.kind, "document");
+    let metadata = result.document_metadata.unwrap();
+    assert_eq!(metadata.page_count, None);
+    assert_eq!(metadata.extension, "pdf");
+    assert!(
+        result
+            .error_message
+            .as_deref()
+            .is_some_and(|message| message.contains("已导入") && message.contains("页数")),
+        "expected soft import warning, got {:?}",
+        result.error_message
+    );
 }
 
 #[test]
@@ -217,6 +249,7 @@ fn convert_image_file_writes_requested_format() {
         color_mode: "rgb".into(),
         quality: Some(88),
         allow_source_overwrite: false,
+    task_id: None,
     })
     .unwrap();
 
@@ -249,6 +282,7 @@ fn convert_image_file_reencodes_jpeg_family_to_requested_jpg_name() {
         color_mode: "grayscale".into(),
         quality: Some(80),
         allow_source_overwrite: false,
+    task_id: None,
     })
     .unwrap();
 
@@ -279,6 +313,7 @@ fn convert_image_file_writes_single_channel_grayscale_png() {
         color_mode: "grayscale".into(),
         quality: Some(90),
         allow_source_overwrite: false,
+    task_id: None,
     })
     .unwrap();
 
@@ -304,6 +339,7 @@ fn convert_image_file_writes_single_channel_grayscale_webp() {
         color_mode: "grayscale".into(),
         quality: Some(90),
         allow_source_overwrite: false,
+    task_id: None,
     })
     .unwrap();
 
@@ -335,6 +371,7 @@ fn convert_image_file_applies_webp_quality() {
         color_mode: "rgb".into(),
         quality: Some(30),
         allow_source_overwrite: false,
+    task_id: None,
     })
     .unwrap();
     let high_output = run_convert_image_file(ConvertImageFileRequest {
@@ -344,6 +381,7 @@ fn convert_image_file_applies_webp_quality() {
         color_mode: "rgb".into(),
         quality: Some(90),
         allow_source_overwrite: false,
+    task_id: None,
     })
     .unwrap();
 
@@ -383,6 +421,7 @@ fn convert_image_file_jpeg_copy_is_byte_identical_at_quality_100() {
         color_mode: "rgb".into(),
         quality: Some(100),
         allow_source_overwrite: false,
+    task_id: None,
     })
     .unwrap();
 
@@ -408,6 +447,7 @@ fn convert_image_file_jpeg_copy_reencodes_when_quality_is_99() {
         color_mode: "rgb".into(),
         quality: Some(99),
         allow_source_overwrite: false,
+    task_id: None,
     })
     .unwrap();
 
@@ -436,6 +476,7 @@ fn convert_image_file_jpeg_copy_reencodes_when_color_mode_is_grayscale() {
         color_mode: "grayscale".into(),
         quality: Some(100),
         allow_source_overwrite: false,
+    task_id: None,
     })
     .unwrap();
 
@@ -459,6 +500,7 @@ fn convert_image_file_jpeg_copy_rejects_non_jpeg_bytes_with_jpg_extension() {
         color_mode: "rgb".into(),
         quality: Some(100),
         allow_source_overwrite: false,
+    task_id: None,
     })
     .unwrap_err();
 
@@ -479,6 +521,7 @@ fn convert_image_file_reencodes_in_place_when_source_overwrite_authorized() {
         color_mode: "rgb".into(),
         quality: Some(100),
         allow_source_overwrite: true,
+    task_id: None,
     })
     .unwrap();
 
@@ -502,6 +545,7 @@ fn convert_image_file_rejects_same_source_output_without_authorization() {
         color_mode: "rgb".into(),
         quality: Some(90),
         allow_source_overwrite: false,
+    task_id: None,
     })
     .unwrap_err();
 
@@ -523,6 +567,7 @@ fn convert_image_file_rejects_missing_source() {
         color_mode: "rgb".into(),
         quality: Some(90),
         allow_source_overwrite: false,
+    task_id: None,
     })
     .unwrap_err();
 
@@ -542,6 +587,7 @@ fn convert_image_file_rejects_directory_source() {
         color_mode: "rgb".into(),
         quality: Some(90),
         allow_source_overwrite: false,
+    task_id: None,
     })
     .unwrap_err();
 
@@ -565,6 +611,7 @@ fn convert_image_file_rejects_unsupported_output_format() {
         color_mode: "rgb".into(),
         quality: Some(90),
         allow_source_overwrite: false,
+    task_id: None,
     })
     .unwrap_err();
 
@@ -587,6 +634,7 @@ fn convert_image_file_rejects_unsupported_color_mode() {
         color_mode: "sepia".into(),
         quality: Some(90),
         allow_source_overwrite: false,
+    task_id: None,
     })
     .unwrap_err();
 
@@ -610,6 +658,7 @@ fn convert_image_file_rejects_out_of_range_quality() {
             color_mode: "rgb".into(),
             quality,
             allow_source_overwrite: false,
+        task_id: None,
         })
         .unwrap_err();
 
@@ -650,6 +699,7 @@ fn document_render_request(
         page_numbers: vec![],
         render_density: "high".into(),
         naming_pattern: "source-name-index".into(),
+    task_id: None,
     }
 }
 
@@ -775,4 +825,149 @@ async fn render_document_command_rejects_invalid_inputs_before_helper() {
         assert!(prepare_document_render(request, &renderer).await.is_err());
         assert!(renderer.calls.lock().unwrap().is_empty(), "{invalid}");
     }
+}
+
+/// 生成 PDFium 可渲染的空白多页 PDF，供真实渲染冒烟使用。
+fn write_blank_multipage_pdf(path: &Path, page_count: u32) {
+    assert!(page_count >= 1);
+    let mut objects: Vec<Vec<u8>> = Vec::new();
+    let pages_kids: String = (0..page_count)
+        .map(|index| format!("{} 0 R", 3 + index * 2))
+        .collect::<Vec<_>>()
+        .join(" ");
+    objects.push(b"1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n".to_vec());
+    objects.push(
+        format!("2 0 obj\n<< /Type /Pages /Kids [{pages_kids}] /Count {page_count} >>\nendobj\n")
+            .into_bytes(),
+    );
+    for index in 0..page_count {
+        let page_id = 3 + index * 2;
+        let content_id = page_id + 1;
+        let gray = 0.2 + 0.15 * f64::from(index);
+        let stream = format!("q\n{gray:.2} g\n0 0 200 200 re\nf\nQ\n");
+        objects.push(
+            format!(
+                "{page_id} 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] /Contents {content_id} 0 R >>\nendobj\n"
+            )
+            .into_bytes(),
+        );
+        objects.push(
+            format!(
+                "{content_id} 0 obj\n<< /Length {} >>\nstream\n{stream}endstream\nendobj\n",
+                stream.len()
+            )
+            .into_bytes(),
+        );
+    }
+    let mut content = b"%PDF-1.4\n".to_vec();
+    let mut offsets = vec![0usize];
+    for object in &objects {
+        offsets.push(content.len());
+        content.extend_from_slice(object);
+    }
+    let xref_start = content.len();
+    let size = objects.len() + 1;
+    content.extend_from_slice(format!("xref\n0 {size}\n").as_bytes());
+    content.extend_from_slice(b"0000000000 65535 f \n");
+    for offset in offsets.iter().skip(1) {
+        content.extend_from_slice(format!("{offset:010} 00000 n \n").as_bytes());
+    }
+    content.extend_from_slice(
+        format!("trailer\n<< /Size {size} /Root 1 0 R >>\nstartxref\n").as_bytes(),
+    );
+    content.extend_from_slice(xref_start.to_string().as_bytes());
+    content.extend_from_slice(b"\n%%EOF\n");
+    fs::write(path, content).unwrap();
+}
+
+fn test_pdfium_resource_dir() -> Option<PathBuf> {
+    let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let dll = manifest.join("pdfium").join("pdfium.dll");
+    dll.is_file().then_some(manifest)
+}
+
+/// Fake Office 导出真实多页 PDF；第二次 prepare 走桥接缓存，再经 PDFium 并行渲染。
+#[derive(Default)]
+struct MultipagePdfRenderer {
+    calls: Mutex<Vec<DocumentRendererKind>>,
+}
+
+impl OfficeRenderer for MultipagePdfRenderer {
+    fn render_to_pdf<'a>(
+        &'a self,
+        renderer: DocumentRendererKind,
+        _source: &'a Path,
+        requested_output: &'a Path,
+    ) -> OfficeRenderFuture<'a> {
+        Box::pin(async move {
+            self.calls.lock().unwrap().push(renderer);
+            write_blank_multipage_pdf(requested_output, 4);
+            Ok(requested_output.to_path_buf())
+        })
+    }
+}
+
+#[tokio::test]
+async fn office_bridge_cache_then_pdfium_parallel_rasterize() {
+    let Some(resource_dir) = test_pdfium_resource_dir() else {
+        eprintln!("skip office_bridge_cache_then_pdfium_parallel_rasterize: pdfium.dll missing");
+        return;
+    };
+    clear_bridge_cache();
+
+    let dir = tempdir().unwrap();
+    let source = dir.path().join("report.docx");
+    fs::write(&source, b"office-body-for-pdfium").unwrap();
+    let renderer = MultipagePdfRenderer::default();
+
+    let first = prepare_document_render(
+        document_render_request(&source, &dir.path().join("out-a")),
+        &renderer,
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        renderer.calls.lock().unwrap().as_slice(),
+        &[DocumentRendererKind::Word]
+    );
+    assert_eq!(
+        count_pdf_pages(first.source_path(), Some(resource_dir.as_path())).unwrap(),
+        4
+    );
+    drop(first);
+
+    // 改输出格式语义：同源二次 prepare 应命中桥接缓存，不再调用 Office。
+    let second = prepare_document_render(
+        {
+            let mut request = document_render_request(&source, &dir.path().join("out-b"));
+            request.output_format = "png".into();
+            request.color_mode = "rgb".into();
+            request.quality = 90;
+            request
+        },
+        &renderer,
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        renderer.calls.lock().unwrap().as_slice(),
+        &[DocumentRendererKind::Word],
+        "same source must reuse cached bridge.pdf"
+    );
+
+    let mut pages = Vec::new();
+    render_pdf_pages_with_callback(
+        second.source_path(),
+        Some(resource_dir.as_path()),
+        &[],
+        "standard",
+        |page| {
+            pages.push(page.page_number);
+            assert!(page.image.width() > 0);
+            Ok(())
+        },
+    )
+    .expect("cached bridge must rasterize via PDFium");
+    assert_eq!(pages, vec![1, 2, 3, 4]);
+    clear_bridge_cache();
 }

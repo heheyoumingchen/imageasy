@@ -3,7 +3,8 @@ use serde::Serialize;
 use std::path::Path;
 use std::process::Command;
 
-use super::{editor, image_download, stitching};
+use super::{editor, image_download, path_guard, stitching};
+use crate::document_renderer::bridge_cache;
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -79,46 +80,51 @@ fn clear_app_cache_impl() -> Result<CacheUsageResult> {
     clear_directory_contents(&editor::editor_thumbnail_cache_dir())?;
     clear_directory_contents(&editor::editor_preview_cache_dir())?;
     clear_directory_contents(&stitching::stitching_thumbnail_cache_dir())?;
+    // 进程内 Office→PDF 桥接缓存一并丢弃，避免设置页“清理缓存”后仍命中陈旧桥接。
+    bridge_cache::clear_bridge_cache();
     get_app_cache_usage_impl()
 }
 
 #[tauri::command]
 pub fn get_app_cache_usage() -> Result<CacheUsageResult, String> {
-    get_app_cache_usage_impl().map_err(|error| error.to_string())
+    get_app_cache_usage_impl().map_err(crate::commands::error_message::to_user_error_string)
 }
 
 #[tauri::command]
 pub fn clear_app_cache() -> Result<CacheUsageResult, String> {
-    clear_app_cache_impl().map_err(|error| error.to_string())
+    clear_app_cache_impl().map_err(crate::commands::error_message::to_user_error_string)
 }
 
 #[tauri::command]
 pub fn open_directory_in_system(path: String) -> Result<(), String> {
+    let directory = path_guard::require_existing_dir(Path::new(path.trim()))
+        .map_err(crate::commands::error_message::to_user_error_string)?;
+
     #[cfg(target_os = "windows")]
     {
-        let normalized = path.replace('/', "\\");
+        let normalized = directory.to_string_lossy().replace('/', "\\");
         Command::new("explorer")
             .arg(normalized)
             .spawn()
-            .map_err(|error| error.to_string())?;
+            .map_err(crate::commands::error_message::to_user_error_string)?;
         return Ok(());
     }
 
     #[cfg(target_os = "macos")]
     {
         Command::new("open")
-            .arg(path)
+            .arg(&directory)
             .spawn()
-            .map_err(|error| error.to_string())?;
+            .map_err(crate::commands::error_message::to_user_error_string)?;
         return Ok(());
     }
 
     #[cfg(all(unix, not(target_os = "macos")))]
     {
         Command::new("xdg-open")
-            .arg(path)
+            .arg(&directory)
             .spawn()
-            .map_err(|error| error.to_string())?;
+            .map_err(crate::commands::error_message::to_user_error_string)?;
         return Ok(());
     }
 

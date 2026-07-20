@@ -1,11 +1,15 @@
 //! Office helper sidecar 客户端：流式解析协议、限制诊断，并执行分阶段截止时间。
 
 use std::future::Future;
+use std::io::{Read, Write};
+use std::path::{Path, PathBuf};
+use std::process::{Child, Command, Stdio};
 use std::time::Duration;
 
 use tauri::Runtime;
 use tauri_plugin_shell::process::{CommandChild, CommandEvent};
 use tauri_plugin_shell::ShellExt;
+use tokio::sync::mpsc;
 
 use super::error::{CommandError, CommandErrorCode, DocumentRendererKind, RendererStage};
 use super::protocol::{
@@ -18,7 +22,9 @@ pub const EXPORT_TIMEOUT: Duration = Duration::from_secs(120);
 pub const OVERALL_TIMEOUT: Duration = Duration::from_secs(140);
 pub const MAX_STDERR_BYTES: usize = 4 * 1024;
 
-const HELPER_SIDECAR_BASENAME: &str = "document-renderer-helper";
+// 与 tauri.conf.json bundle.externalBin 及 capabilities 中的 sidecar name 保持一致。
+const HELPER_SIDECAR_BASENAME: &str = "binaries/document-renderer-helper";
+const HELPER_BASENAME: &str = "document-renderer-helper";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct HelperClientTimeouts {
@@ -285,7 +291,8 @@ pub trait HelperTransport {
     fn kill_child(&mut self) -> Result<(), CommandError>;
 }
 
-/// 通过可注入 transport 执行一次 helper 会话。
+/// 通过可注入 transport 执行一次 helper 请求。
+/// 成功时在收到 Result 终帧后立即返回，**不**关闭子进程，便于多请求复用。
 pub async fn run_helper_with_transport<T: HelperTransport>(
     transport: &mut T,
     request: &HelperRequest,
@@ -312,9 +319,9 @@ pub async fn run_helper_with_transport<T: HelperTransport>(
             Ok(None) => HelperEvent::StdoutEof,
             Err(_) => HelperEvent::Time(started.elapsed()),
         };
-        let eof = matches!(event, HelperEvent::StdoutEof);
         match session.handle_event(event) {
-            Ok(Some(HelperResult::Ok)) if eof => return Ok(()),
+            // 多请求会话：终帧即完成，无需等待 stdout EOF。
+            Ok(Some(HelperResult::Ok)) => return Ok(()),
             Ok(_) => {}
             Err(error) => {
                 kill_if_requested(&mut session, transport);
@@ -324,24 +331,220 @@ pub async fn run_helper_with_transport<T: HelperTransport>(
     }
 }
 
-/// 启动一次 Office helper 请求。失败或超时仅终止本次 sidecar 子进程。
+/// 进程级 helper 连接池：同一应用生命周期内复用子进程，批量 Word 转换显著减少启动开销。
+enum LiveTransport {
+    Sidecar(SidecarTransport),
+    Local(LocalProcessTransport),
+}
+
+impl HelperTransport for LiveTransport {
+    fn write_request(&mut self, request_line: &[u8]) -> Result<(), CommandError> {
+        match self {
+            Self::Sidecar(transport) => transport.write_request(request_line),
+            Self::Local(transport) => transport.write_request(request_line),
+        }
+    }
+
+    fn next_event(&mut self) -> impl Future<Output = Option<HelperEvent>> + Send {
+        async move {
+            match self {
+                Self::Sidecar(transport) => transport.next_event().await,
+                Self::Local(transport) => transport.next_event().await,
+            }
+        }
+    }
+
+    fn kill_child(&mut self) -> Result<(), CommandError> {
+        match self {
+            Self::Sidecar(transport) => transport.kill_child(),
+            Self::Local(transport) => transport.kill_child(),
+        }
+    }
+}
+
+struct PooledHelper {
+    transport: LiveTransport,
+}
+
+static HELPER_POOL: tokio::sync::Mutex<Option<PooledHelper>> =
+    tokio::sync::Mutex::const_new(None);
+
+/// 启动一次 Office helper 请求。成功时保留子进程供后续文档复用。
 pub async fn run_helper<R: Runtime>(
     app: &tauri::AppHandle<R>,
     request: &HelperRequest,
 ) -> Result<(), CommandError> {
-    let command = app
-        .shell()
-        .sidecar(HELPER_SIDECAR_BASENAME)
-        .map_err(|_| launch_error(request.renderer))?
-        .set_raw_out(true);
-    let (receiver, child) = command
-        .spawn()
-        .map_err(|_| launch_error(request.renderer))?;
-    let mut transport = SidecarTransport {
-        receiver,
-        child: Some(child),
-    };
-    run_helper_with_transport(&mut transport, request, HelperClientTimeouts::default()).await
+    use super::timing::log_stage_timing;
+    use std::time::Instant;
+
+    let timeouts = HelperClientTimeouts::default();
+    let helper_started = Instant::now();
+
+    // 先尝试复用已有 helper 进程。
+    {
+        let mut pool = HELPER_POOL.lock().await;
+        if let Some(pooled) = pool.as_mut() {
+            match run_helper_with_transport(&mut pooled.transport, request, timeouts).await {
+                Ok(()) => {
+                    log_stage_timing("helper_reuse", helper_started.elapsed());
+                    return Ok(());
+                }
+                Err(error) => {
+                    let _ = pooled.transport.kill_child();
+                    *pool = None;
+                    // 连接层失败则重建一次；业务错误（文档坏了）已带在 error 中，但 helper 也可能已死，仍重建。
+                    // 对业务错误直接返回，避免把“文档打不开”重试成“找不到 helper”。
+                    if !is_retryable_helper_error(&error) {
+                        log_stage_timing("helper_failed", helper_started.elapsed());
+                        return Err(error);
+                    }
+                }
+            }
+        }
+    }
+
+    let spawn_started = Instant::now();
+    let mut transport = spawn_helper_transport(app, request.renderer).await?;
+    log_stage_timing("helper_spawn", spawn_started.elapsed());
+    match run_helper_with_transport(&mut transport, request, timeouts).await {
+        Ok(()) => {
+            let mut pool = HELPER_POOL.lock().await;
+            *pool = Some(PooledHelper { transport });
+            log_stage_timing("helper_export", helper_started.elapsed());
+            Ok(())
+        }
+        Err(error) => {
+            let _ = transport.kill_child();
+            log_stage_timing("helper_failed", helper_started.elapsed());
+            Err(error)
+        }
+    }
+}
+
+fn is_retryable_helper_error(error: &CommandError) -> bool {
+    // 仅在 helper 进程/定位失败时重建；文档内容类业务错误直接返回。
+    let message = error.message.as_str();
+    message.contains("document-renderer-helper")
+        || message.contains("通信失败")
+        || message.contains("未找到")
+        || message.contains("helper transport")
+}
+
+async fn spawn_helper_transport<R: Runtime>(
+    app: &tauri::AppHandle<R>,
+    renderer: DocumentRendererKind,
+) -> Result<LiveTransport, CommandError> {
+    let mut attempts: Vec<String> = Vec::new();
+
+    // 1) 官方 externalBin sidecar 路径（正式安装包 / 正确 stage 后）。
+    match app.shell().sidecar(HELPER_SIDECAR_BASENAME) {
+        Ok(command) => match command.set_raw_out(true).spawn() {
+            Ok((receiver, child)) => {
+                return Ok(LiveTransport::Sidecar(SidecarTransport {
+                    receiver,
+                    child: Some(child),
+                }));
+            }
+            Err(error) => attempts.push(format!("sidecar spawn: {error}")),
+        },
+        Err(error) => attempts.push(format!("sidecar resolve: {error}")),
+    }
+
+    // 2) 绝对路径 + 本地进程：不依赖 cwd，也不依赖 shell ACL 对任意路径的授权。
+    for path in helper_binary_candidates() {
+        if !path.is_file() {
+            attempts.push(format!("missing: {}", path.display()));
+            continue;
+        }
+        match spawn_local_helper_transport(&path) {
+            Ok(transport) => return Ok(LiveTransport::Local(transport)),
+            Err(error) => attempts.push(format!("{}: {error}", path.display())),
+        }
+    }
+
+    Err(launch_error(
+        renderer,
+        Some(format!(
+            "未找到可用的 document-renderer-helper。尝试：{}",
+            attempts.join(" | ")
+        )),
+    ))
+}
+
+/// 编译期目标三元组（优先 TARGET，否则按平台推断）。
+pub fn helper_host_triple() -> &'static str {
+    if let Some(target) = option_env!("TARGET") {
+        return target;
+    }
+    if cfg!(all(windows, target_arch = "x86_64")) {
+        "x86_64-pc-windows-msvc"
+    } else if cfg!(all(windows, target_arch = "aarch64")) {
+        "aarch64-pc-windows-msvc"
+    } else if cfg!(all(target_os = "macos", target_arch = "aarch64")) {
+        "aarch64-apple-darwin"
+    } else if cfg!(all(target_os = "macos", target_arch = "x86_64")) {
+        "x86_64-apple-darwin"
+    } else {
+        "unknown"
+    }
+}
+
+/// helper 可执行文件名候选（含 triple 与无 triple 两种）。
+pub fn helper_candidate_file_names() -> Vec<String> {
+    let triple = helper_host_triple();
+    #[cfg(windows)]
+    {
+        vec![
+            format!("{HELPER_BASENAME}-{triple}.exe"),
+            format!("{HELPER_BASENAME}.exe"),
+        ]
+    }
+    #[cfg(not(windows))]
+    {
+        vec![
+            format!("{HELPER_BASENAME}-{triple}"),
+            HELPER_BASENAME.to_string(),
+        ]
+    }
+}
+
+/// 解析 helper 绝对路径候选：当前 exe 同级 / binaries / 源码 binaries。
+pub fn helper_binary_candidates() -> Vec<PathBuf> {
+    let names = helper_candidate_file_names();
+    let mut out = Vec::new();
+
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(dir) = exe.parent() {
+            push_named_candidates(&mut out, dir, &names);
+            push_named_candidates(&mut out, &dir.join("binaries"), &names);
+            // tauri dev 有时从 target/debug 启动，源码 binaries 在 ../../binaries
+            if let Some(parent) = dir.parent() {
+                push_named_candidates(&mut out, &parent.join("binaries"), &names);
+                if let Some(grand) = parent.parent() {
+                    push_named_candidates(&mut out, &grand.join("binaries"), &names);
+                }
+            }
+        }
+    }
+
+    // cargo/tauri 开发：直接使用 crate 内 staged binaries（不依赖 cwd）。
+    let manifest_binaries = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("binaries");
+    push_named_candidates(&mut out, &manifest_binaries, &names);
+
+    out
+}
+
+fn push_named_candidates(out: &mut Vec<PathBuf>, dir: &Path, names: &[String]) {
+    for name in names {
+        out.push(dir.join(name));
+    }
+}
+
+/// 返回第一个实际存在的 helper 路径（供测试与诊断）。
+pub fn resolve_existing_helper_path() -> Option<PathBuf> {
+    helper_binary_candidates()
+        .into_iter()
+        .find(|path| path.is_file())
 }
 
 struct SidecarTransport {
@@ -353,7 +556,7 @@ impl HelperTransport for SidecarTransport {
     fn write_request(&mut self, request_line: &[u8]) -> Result<(), CommandError> {
         self.child
             .as_mut()
-            .ok_or_else(|| launch_error(DocumentRendererKind::Word))?
+            .ok_or_else(|| launch_error(DocumentRendererKind::Word, None))?
             .write(request_line)
             .map_err(|_| {
                 CommandError::new(
@@ -364,22 +567,20 @@ impl HelperTransport for SidecarTransport {
             })
     }
 
-    fn next_event(&mut self) -> impl Future<Output = Option<HelperEvent>> + Send {
-        async move {
-            match self.receiver.recv().await {
-                Some(CommandEvent::Stdout(bytes)) => Some(HelperEvent::Stdout(bytes)),
-                Some(CommandEvent::Stderr(bytes)) => Some(HelperEvent::Stderr(bytes)),
-                Some(CommandEvent::Error(_)) => {
-                    Some(HelperEvent::TransportError("helper transport error".into()))
-                }
-                Some(CommandEvent::Terminated(_)) | None => {
-                    self.child = None;
-                    Some(HelperEvent::StdoutEof)
-                }
-                Some(_) => Some(HelperEvent::TransportError(
-                    "unsupported helper event".into(),
-                )),
+    async fn next_event(&mut self) -> Option<HelperEvent> {
+        match self.receiver.recv().await {
+            Some(CommandEvent::Stdout(bytes)) => Some(HelperEvent::Stdout(bytes)),
+            Some(CommandEvent::Stderr(bytes)) => Some(HelperEvent::Stderr(bytes)),
+            Some(CommandEvent::Error(_)) => {
+                Some(HelperEvent::TransportError("helper transport error".into()))
             }
+            Some(CommandEvent::Terminated(_)) | None => {
+                self.child = None;
+                Some(HelperEvent::StdoutEof)
+            }
+            Some(_) => Some(HelperEvent::TransportError(
+                "unsupported helper event".into(),
+            )),
         }
     }
 
@@ -397,17 +598,189 @@ impl HelperTransport for SidecarTransport {
     }
 }
 
+/// 本地绝对路径启动 helper（绕过 shell ACL 对任意 cmd 的限制，也不依赖 cwd）。
+struct LocalProcessTransport {
+    child: Option<Child>,
+    events: mpsc::Receiver<HelperEvent>,
+}
+
+fn spawn_local_helper_transport(path: &Path) -> Result<LocalProcessTransport, String> {
+    let mut child = Command::new(path)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|error| format!("spawn failed: {error}"))?;
+
+    let stdout = child
+        .stdout
+        .take()
+        .ok_or_else(|| "helper stdout missing".to_string())?;
+    let stderr = child
+        .stderr
+        .take()
+        .ok_or_else(|| "helper stderr missing".to_string())?;
+
+    let (tx, rx) = mpsc::channel::<HelperEvent>(64);
+    let tx_stdout = tx.clone();
+    std::thread::spawn(move || {
+        let mut stdout = stdout;
+        let mut buffer = [0_u8; 4096];
+        loop {
+            match stdout.read(&mut buffer) {
+                Ok(0) => {
+                    let _ = tx_stdout.blocking_send(HelperEvent::StdoutEof);
+                    break;
+                }
+                Ok(n) => {
+                    if tx_stdout
+                        .blocking_send(HelperEvent::Stdout(buffer[..n].to_vec()))
+                        .is_err()
+                    {
+                        break;
+                    }
+                }
+                Err(_) => {
+                    let _ = tx_stdout.blocking_send(HelperEvent::TransportError(
+                        "helper stdout read failed".into(),
+                    ));
+                    break;
+                }
+            }
+        }
+    });
+    std::thread::spawn(move || {
+        let mut stderr = stderr;
+        let mut buffer = [0_u8; 1024];
+        loop {
+            match stderr.read(&mut buffer) {
+                Ok(0) => break,
+                Ok(n) => {
+                    if tx
+                        .blocking_send(HelperEvent::Stderr(buffer[..n].to_vec()))
+                        .is_err()
+                    {
+                        break;
+                    }
+                }
+                Err(_) => break,
+            }
+        }
+    });
+
+    Ok(LocalProcessTransport {
+        child: Some(child),
+        events: rx,
+    })
+}
+
+impl HelperTransport for LocalProcessTransport {
+    fn write_request(&mut self, request_line: &[u8]) -> Result<(), CommandError> {
+        let child = self
+            .child
+            .as_mut()
+            .ok_or_else(|| launch_error(DocumentRendererKind::Word, None))?;
+        let stdin = child.stdin.as_mut().ok_or_else(|| {
+            CommandError::new(
+                CommandErrorCode::DocumentRendererExportFailed,
+                "无法向 Office helper 发送请求",
+            )
+            .with_stage(RendererStage::Launch)
+        })?;
+        stdin.write_all(request_line).map_err(|_| {
+            CommandError::new(
+                CommandErrorCode::DocumentRendererExportFailed,
+                "无法向 Office helper 发送请求",
+            )
+            .with_stage(RendererStage::Launch)
+        })?;
+        stdin.flush().map_err(|_| {
+            CommandError::new(
+                CommandErrorCode::DocumentRendererExportFailed,
+                "无法向 Office helper 发送请求",
+            )
+            .with_stage(RendererStage::Launch)
+        })?;
+        Ok(())
+    }
+
+    async fn next_event(&mut self) -> Option<HelperEvent> {
+        self.events.recv().await
+    }
+
+    fn kill_child(&mut self) -> Result<(), CommandError> {
+        if let Some(mut child) = self.child.take() {
+            let _ = child.kill();
+            let _ = child.wait();
+        }
+        Ok(())
+    }
+}
+
 fn kill_if_requested<T: HelperTransport>(session: &mut HelperClientSession, transport: &mut T) {
     if session.take_kill_reason().is_some() {
         let _ = transport.kill_child();
     }
 }
 
-fn launch_error(renderer: DocumentRendererKind) -> CommandError {
-    CommandError::new(
-        CommandErrorCode::DocumentRendererExportFailed,
-        "无法启动 Office helper",
-    )
-    .with_stage(RendererStage::Launch)
-    .with_renderer(renderer)
+fn launch_error(renderer: DocumentRendererKind, detail: Option<String>) -> CommandError {
+    let (code, message) = match renderer {
+        DocumentRendererKind::Word => (
+            CommandErrorCode::WordRendererNotAvailable,
+            "无法启动 Word 转换组件：未找到 document-renderer-helper。请重新安装应用，或在开发环境先运行 pnpm ensure:sidecar && node scripts/stage-sidecar.mjs --profile debug。",
+        ),
+        DocumentRendererKind::Wps => (
+            CommandErrorCode::WpsRendererNotAvailable,
+            "无法启动 WPS 转换组件：未找到 document-renderer-helper。请重新安装应用，或在开发环境先运行 pnpm ensure:sidecar && node scripts/stage-sidecar.mjs --profile debug。",
+        ),
+        DocumentRendererKind::Pdfium => (
+            CommandErrorCode::DocumentRendererExportFailed,
+            "无法启动文档转换组件",
+        ),
+    };
+    let mut error = CommandError::new(code, message)
+        .with_stage(RendererStage::Launch)
+        .with_renderer(renderer);
+    if let Some(detail) = detail {
+        error = error.with_diagnostic(detail);
+    }
+    error
+}
+
+#[cfg(test)]
+mod helper_path_tests {
+    use super::*;
+
+    #[test]
+    fn helper_candidate_names_include_triple_and_plain() {
+        let names = helper_candidate_file_names();
+        assert!(names.iter().any(|name| name.contains(HELPER_BASENAME)));
+        assert!(names.iter().any(|name| name.contains(helper_host_triple())));
+    }
+
+    #[test]
+    fn helper_candidates_include_manifest_binaries_dir() {
+        let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("binaries");
+        let candidates = helper_binary_candidates();
+        assert!(
+            candidates.iter().any(|path| path.starts_with(&manifest)),
+            "expected candidates under {}",
+            manifest.display()
+        );
+    }
+
+    #[test]
+    fn resolve_existing_helper_finds_staged_binary_when_present() {
+        // 仓库 binaries 中若已 stage，应能解析到真实文件，且不依赖 cwd。
+        if let Some(path) = resolve_existing_helper_path() {
+            assert!(path.is_file(), "{}", path.display());
+            assert!(
+                path.file_name()
+                    .and_then(|value| value.to_str())
+                    .is_some_and(|name| name.contains(HELPER_BASENAME)),
+                "unexpected helper name: {}",
+                path.display()
+            );
+        }
+    }
 }
