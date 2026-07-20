@@ -1,7 +1,9 @@
-//! Office 渲染 helper 的一次性请求/响应协议。
+//! Office 渲染 helper 的请求/响应协议。
 //!
-//! 传输为 JSON Lines：每帧一行 UTF-8 JSON。helper 只读取恰好一个请求行，
-//! 随后输出零或多个 `Progress` 帧，最终以恰好一个 `Result` 终帧收尾。
+//! 传输为 JSON Lines：每帧一行 UTF-8 JSON。
+//! helper 可在同一进程中连续读取多条请求行（多文档会话）：
+//! 每条请求后输出零或多个 `Progress` 帧，并以恰好一个 `Result` 终帧收尾，然后等待下一条请求。
+//! 父进程在 stdin 关闭或进程退出时结束会话。
 //! 严格限长，拒绝越权数据，且任何序列化结果都不得包含源/输出绝对路径。
 
 use std::path::PathBuf;

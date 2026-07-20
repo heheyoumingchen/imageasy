@@ -6,8 +6,8 @@ use std::sync::OnceLock;
 /// 当可执行文件同级目录存在 `.portable` 标记文件时，应用进入便携模式：
 /// - 设置文件存放在程序目录的 `data/` 子目录
 /// - 缓存文件存放在程序目录的 `cache/` 子目录
+///
 /// 否则走系统默认路径（临时目录、当前目录）。
-
 static PORTABLE_STATE: OnceLock<PortableState> = OnceLock::new();
 
 #[derive(Debug)]

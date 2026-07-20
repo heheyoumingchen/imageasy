@@ -33,6 +33,7 @@ pub trait AutomationBackend {
 /// 按安全顺序执行一次转换，并在任何失败后运行安全的剩余清理。
 ///
 /// 进度回调在关键阶段被调用；清理阶段的失败不覆盖首个业务错误。
+#[cfg_attr(not(test), allow(dead_code))]
 pub fn run_conversion<B, P>(
     backend: &mut B,
     request: &HelperRequest,
@@ -44,31 +45,28 @@ where
 {
     emit_progress(HelperProgressStage::Starting);
 
-    // STA 必须先于对象创建。失败则无需任何清理（COM 未初始化、无代理）。
-    if let Err(error) = backend.initialize_sta() {
+    if let Err(error) = bootstrap_application(backend, &mut emit_progress) {
         return HelperResult::Err(error);
     }
 
-    // 从这里起，COM 已初始化：任何后续失败都必须至少 uninitialize。
-    let outcome = run_after_sta(backend, request, &mut emit_progress);
-
-    match outcome {
+    let business = export_opened_document(backend, request, &mut emit_progress);
+    let shutdown = shutdown_application(backend);
+    match business.and(shutdown) {
         Ok(()) => HelperResult::Ok,
         Err(error) => HelperResult::Err(error),
     }
 }
 
-/// STA 成功之后的序列；负责在失败路径上执行安全清理。
-fn run_after_sta<B, P>(
-    backend: &mut B,
-    request: &HelperRequest,
-    emit_progress: &mut P,
-) -> Result<(), CommandError>
+/// 启动 STA、创建应用并完成安全配置（不打开文档）。
+/// 失败时已尽量做了 release + uninitialize。
+pub fn bootstrap_application<B, P>(backend: &mut B, emit_progress: &mut P) -> Result<(), CommandError>
 where
     B: AutomationBackend + ?Sized,
     P: FnMut(HelperProgressStage),
 {
-    // 创建应用。失败：无应用可退出，但需释放代理 + 反初始化。
+    // STA 必须先于对象创建。失败则无需任何清理。
+    backend.initialize_sta()?;
+
     if let Err(error) = backend.create_application() {
         backend.release_proxies();
         backend.uninitialize();
@@ -76,20 +74,18 @@ where
     }
     emit_progress(HelperProgressStage::ApplicationReady);
 
-    // 应用已创建：此后所有失败路径都要 quit + release + uninit。
-    let business = run_with_application(backend, request, emit_progress);
-
-    // 安全清理：退出应用、释放代理、反初始化 COM。始终执行。
-    let quit = backend.quit_application();
-    backend.release_proxies();
-    backend.uninitialize();
-
-    // 首个业务错误优先；业务成功时才暴露退出错误。
-    business.and(quit)
+    if let Err(error) = backend.configure_security() {
+        let _ = backend.quit_application();
+        backend.release_proxies();
+        backend.uninitialize();
+        return Err(error);
+    }
+    Ok(())
 }
 
-/// 应用已就绪之后的序列：配置安全 → 打开 → 导出 → 关闭文档。
-fn run_with_application<B, P>(
+/// 在已启动的应用上打开文档、导出 PDF 并关闭文档（不退出应用）。
+/// 用于 helper 多请求会话内复用同一 Office 实例。
+pub fn export_opened_document<B, P>(
     backend: &mut B,
     request: &HelperRequest,
     emit_progress: &mut P,
@@ -98,21 +94,25 @@ where
     B: AutomationBackend + ?Sized,
     P: FnMut(HelperProgressStage),
 {
-    // 安全设置必须先于打开。
-    backend.configure_security()?;
-
-    // 打开文档。失败：无已打开文档可关闭，交由上层 quit。
     backend.open_document(&request.source_path)?;
     emit_progress(HelperProgressStage::DocumentOpened);
 
-    // 文档已打开：无论导出成败都要关闭文档。
     emit_progress(HelperProgressStage::Exporting);
     let export = backend.export_pdf(&request.output_pdf_path);
     let close = backend.close_document();
     emit_progress(HelperProgressStage::Cleanup);
-
-    // 导出错误优先；导出成功时才暴露关闭错误。
     export.and(close)
+}
+
+/// 退出应用并释放 COM。清理错误会返回，但 release/uninitialize 始终执行。
+pub fn shutdown_application<B>(backend: &mut B) -> Result<(), CommandError>
+where
+    B: AutomationBackend + ?Sized,
+{
+    let quit = backend.quit_application();
+    backend.release_proxies();
+    backend.uninitialize();
+    quit
 }
 
 #[cfg(test)]
@@ -250,6 +250,55 @@ mod tests {
                 Event::Uninitialize,
             ]
         );
+    }
+
+    #[test]
+    fn automation_reuses_application_for_multiple_exports() {
+        let mut backend = FakeBackend::new();
+        let mut stages = Vec::new();
+        bootstrap_application(&mut backend, &mut |stage| stages.push(stage)).unwrap();
+        export_opened_document(&mut backend, &request(), &mut |stage| stages.push(stage)).unwrap();
+        export_opened_document(&mut backend, &request(), &mut |stage| stages.push(stage)).unwrap();
+        shutdown_application(&mut backend).unwrap();
+
+        // STA / CreateApp / ConfigureSecurity 只发生一次；Open/Export/Close 发生两次。
+        assert_eq!(
+            backend.events.iter().filter(|e| **e == Event::InitSta).count(),
+            1
+        );
+        assert_eq!(
+            backend
+                .events
+                .iter()
+                .filter(|e| **e == Event::CreateApp)
+                .count(),
+            1
+        );
+        assert_eq!(
+            backend
+                .events
+                .iter()
+                .filter(|e| **e == Event::OpenDocument)
+                .count(),
+            2
+        );
+        assert_eq!(
+            backend
+                .events
+                .iter()
+                .filter(|e| **e == Event::ExportPdf)
+                .count(),
+            2
+        );
+        assert_eq!(
+            backend
+                .events
+                .iter()
+                .filter(|e| **e == Event::QuitApp)
+                .count(),
+            1
+        );
+        assert!(stages.contains(&HelperProgressStage::ApplicationReady));
     }
 
     #[test]

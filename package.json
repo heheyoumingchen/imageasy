@@ -7,11 +7,16 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
+    "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
+    "test:e2e": "vitest run tests/e2e",
+    "smoke:bundle": "node scripts/smoke-bundle.mjs",
     "stage:pdfium": "node scripts/stage-pdfium.mjs",
-    "tauri:dev": "tauri dev",
-    "tauri:build": "pnpm stage:pdfium && tauri build",
+    "stage:sidecar": "node scripts/stage-sidecar.mjs",
+    "ensure:sidecar": "node scripts/ensure-sidecar.mjs",
+    "tauri:dev": "pnpm ensure:sidecar && node scripts/stage-sidecar.mjs --profile debug && tauri dev",
+    "tauri:build": "pnpm stage:pdfium && pnpm ensure:sidecar && tauri build",
     "tauri:portable": "pnpm tauri:build && node scripts/bundle-portable.mjs"
   },
   "dependencies": {
@@ -34,8 +39,8 @@
     "@vitejs/plugin-react": "^5.0.0",
     "jsdom": "^26.0.0",
     "tailwindcss": "^4.0.0",
-    "typescript": "^6.0.0-dev.20260401",
-    "vite": "^8.0.0",
+    "typescript": "~7.0.2",
+    "vite": "^8.0.16",
     "vitest": "^4.1.4"
   }
 }

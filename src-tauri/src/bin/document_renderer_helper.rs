@@ -1,14 +1,14 @@
 //! Office 文档渲染 helper 边车。
 //!
-//! 读取恰好一个请求行，仅向 stdout 输出 JSON Lines 帧，随后以单个终帧收尾。
+//! 支持多请求会话：从 stdin 连续读取请求行，每行处理完后写一个 Result 终帧。
+//! 同一渲染器（Word / WPS）会复用已启动的 Office 实例，stdin 关闭时再退出 Office。
 //! 真正的 COM 自动化后端在 Windows 下注入；非 Windows 返回结构化「不可用」。
-//! stderr 诊断有界且不含路径。
 
 use std::io::{BufRead, Write};
 
-use imageasy_lib::document_renderer::error::{CommandError, DocumentRendererKind};
+use imageasy_lib::document_renderer::error::DocumentRendererKind;
 #[cfg(not(windows))]
-use imageasy_lib::document_renderer::error::CommandErrorCode;
+use imageasy_lib::document_renderer::error::{CommandError, CommandErrorCode};
 use imageasy_lib::document_renderer::protocol::{
     HelperFrame, HelperProgressStage, HelperRequest, HelperResult,
 };
@@ -20,7 +20,9 @@ mod automation;
 #[path = "../office_helper/windows_com.rs"]
 mod windows_com;
 
-use automation::run_conversion;
+use automation::{
+    bootstrap_application, export_opened_document, shutdown_application, AutomationBackend,
+};
 
 fn main() {
     let exit_code = real_main();
@@ -29,44 +31,100 @@ fn main() {
 
 fn real_main() -> i32 {
     let stdin = std::io::stdin();
+    let mut input = stdin.lock();
     let mut line = String::new();
-    if stdin.lock().read_line(&mut line).unwrap_or(0) == 0 {
-        emit_terminal(HelperResult::Err(
-            CommandError::protocol("未收到请求").with_renderer(DocumentRendererKind::Word),
-        ));
-        return 1;
+    let mut any_failure = false;
+    let mut session: Option<OfficeSession> = None;
+
+    loop {
+        line.clear();
+        let read = input.read_line(&mut line).unwrap_or(0);
+        if read == 0 {
+            break;
+        }
+        if line.trim().is_empty() {
+            continue;
+        }
+
+        let request = match HelperRequest::from_line(&line) {
+            Ok(request) => request,
+            Err(error) => {
+                any_failure = true;
+                emit_terminal(HelperResult::Err(error));
+                continue;
+            }
+        };
+
+        let result = dispatch_with_session(&mut session, &request);
+        if matches!(result, HelperResult::Err(_)) {
+            any_failure = true;
+            // 业务失败后丢弃会话，避免污染后续文档。
+            if let Some(mut active) = session.take() {
+                let _ = shutdown_application(active.backend.as_mut());
+            }
+        }
+        emit_terminal(result);
     }
 
-    let request = match HelperRequest::from_line(&line) {
-        Ok(request) => request,
-        Err(error) => {
-            emit_terminal(HelperResult::Err(error));
-            return 1;
-        }
-    };
+    if let Some(mut active) = session.take() {
+        let _ = shutdown_application(active.backend.as_mut());
+    }
 
-    let result = dispatch(&request);
-    let failed = matches!(result, HelperResult::Err(_));
-    emit_terminal(result);
-    if failed {
+    if any_failure {
         1
     } else {
         0
     }
 }
 
-/// 选择后端并执行一次转换。非 Windows 或缺少 COM 时返回结构化不可用。
-fn dispatch(request: &HelperRequest) -> HelperResult {
+struct OfficeSession {
+    renderer: DocumentRendererKind,
+    backend: Box<dyn AutomationBackend>,
+}
+
+fn dispatch_with_session(
+    session: &mut Option<OfficeSession>,
+    request: &HelperRequest,
+) -> HelperResult {
     #[cfg(windows)]
     {
-        match windows_com::backend_for(request.renderer) {
-            Ok(mut backend) => run_conversion(backend.as_mut(), request, emit_progress),
+        emit_progress(HelperProgressStage::Starting);
+
+        if let Some(active) = session.as_ref() {
+            if active.renderer != request.renderer {
+                if let Some(mut previous) = session.take() {
+                    let _ = shutdown_application(previous.backend.as_mut());
+                }
+            }
+        }
+
+        if session.is_none() {
+            let mut backend = match windows_com::backend_for(request.renderer) {
+                Ok(backend) => backend,
+                Err(error) => return HelperResult::Err(error),
+            };
+            let mut emit = emit_progress;
+            if let Err(error) = bootstrap_application(backend.as_mut(), &mut emit) {
+                return HelperResult::Err(error);
+            }
+            *session = Some(OfficeSession {
+                renderer: request.renderer,
+                backend,
+            });
+        }
+
+        let active = session
+            .as_mut()
+            .expect("Office session must exist after bootstrap");
+        let mut emit = emit_progress;
+        match export_opened_document(active.backend.as_mut(), request, &mut emit) {
+            Ok(()) => HelperResult::Ok,
             Err(error) => HelperResult::Err(error),
         }
     }
     #[cfg(not(windows))]
     {
-        let _ = request;
+        let _ = session;
         HelperResult::Err(
             CommandError::new(
                 unavailable_code(request.renderer),

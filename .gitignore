@@ -6,6 +6,7 @@ dist-electron/
 src-tauri/target/
 src-tauri/settings.json
 src-tauri/pdfium/
+src-tauri/binaries/
 
 # 构建产物 / 大文件
 green-package/

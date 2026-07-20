@@ -356,7 +356,7 @@ async fn helper_client_fake_child_writes_once_and_completes_without_kill() {
     events.push_back(HelperEvent::Stdout(frame_bytes(HelperFrame::Result(
         HelperResult::Ok,
     ))));
-    events.push_back(HelperEvent::StdoutEof);
+    // 多请求会话：终帧后无需 StdoutEof 即可返回，并保留子进程。
     let mut transport = FakeTransport {
         events,
         writes: Vec::new(),
@@ -371,6 +371,41 @@ async fn helper_client_fake_child_writes_once_and_completes_without_kill() {
         transport.writes,
         vec![request.to_line().unwrap().into_bytes()]
     );
+    assert_eq!(transport.kills, 0);
+}
+
+#[tokio::test]
+async fn helper_client_reuses_transport_for_second_request_without_kill() {
+    let request = sample_request();
+    let mut events = std::collections::VecDeque::new();
+    // 第一次请求
+    events.push_back(HelperEvent::Stdout(frame_bytes(HelperFrame::Progress {
+        stage: HelperProgressStage::ApplicationReady,
+    })));
+    events.push_back(HelperEvent::Stdout(frame_bytes(HelperFrame::Result(
+        HelperResult::Ok,
+    ))));
+    // 第二次请求（复用同一 transport / 子进程）
+    events.push_back(HelperEvent::Stdout(frame_bytes(HelperFrame::Progress {
+        stage: HelperProgressStage::DocumentOpened,
+    })));
+    events.push_back(HelperEvent::Stdout(frame_bytes(HelperFrame::Result(
+        HelperResult::Ok,
+    ))));
+    let mut transport = FakeTransport {
+        events,
+        writes: Vec::new(),
+        kills: 0,
+    };
+
+    run_helper_with_transport(&mut transport, &request, test_timeouts())
+        .await
+        .unwrap();
+    run_helper_with_transport(&mut transport, &request, test_timeouts())
+        .await
+        .unwrap();
+
+    assert_eq!(transport.writes.len(), 2);
     assert_eq!(transport.kills, 0);
 }
 

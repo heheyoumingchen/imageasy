@@ -94,7 +94,30 @@ async function main() {
     console.log('[bundle-portable] ✓ pdfium/');
   }
 
-  // 4. 复制其他 dll 依赖（release 目录中的 .dll 文件）
+  // 4. 复制 Office 文档渲染 sidecar（Tauri 会按 target triple 命名）
+  const helperCandidates = [
+    join(RELEASE_DIR, 'document-renderer-helper.exe'),
+    join(RELEASE_DIR, 'document-renderer-helper'),
+  ];
+  // also pick up any triple-suffixed sidecar next to the main binary if tauri placed it there
+  for (const file of readdirSync(RELEASE_DIR)) {
+    if (file.startsWith('document-renderer-helper')) {
+      helperCandidates.push(join(RELEASE_DIR, file));
+    }
+  }
+  let helperCopied = false;
+  for (const helperPath of helperCandidates) {
+    if (existsSync(helperPath) && statSync(helperPath).isFile()) {
+      copyFileSync(helperPath, join(portableDir, basename(helperPath)));
+      console.log(`[bundle-portable] ✓ ${basename(helperPath)}`);
+      helperCopied = true;
+    }
+  }
+  if (!helperCopied) {
+    console.warn('[bundle-portable] 警告: 未找到 document-renderer-helper，Office 文档转换将不可用');
+  }
+
+  // 5. 复制其他 dll 依赖（release 目录中的 .dll 文件）
   for (const file of readdirSync(RELEASE_DIR)) {
     if (file.endsWith('.dll') && file !== 'WebView2Loader.dll') {
       const fullPath = join(RELEASE_DIR, file);
@@ -105,16 +128,16 @@ async function main() {
     }
   }
 
-  // 5. 创建 .portable 标记文件（激活便携模式）
+  // 6. 创建 .portable 标记文件（激活便携模式）
   writeFileSync(join(portableDir, '.portable'), '');
   console.log('[bundle-portable] ✓ .portable 标记文件');
 
-  // 6. 创建空的 data 和 cache 目录
+  // 7. 创建空的 data 和 cache 目录
   mkdirSync(join(portableDir, 'data'), { recursive: true });
   mkdirSync(join(portableDir, 'cache'), { recursive: true });
   console.log('[bundle-portable] ✓ data/ cache/ 目录');
 
-  // 7. 打包为 zip
+  // 8. 打包为 zip
   const zipName = `${APP_NAME}_${version}_x64_portable.zip`;
   const zipPath = join(BUNDLE_DIR, zipName);
   console.log(`[bundle-portable] 正在压缩为 ${zipName}...`);

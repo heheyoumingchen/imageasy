@@ -31,6 +31,8 @@ pub enum InvokeKind {
 /// 中立的 COM 值抽象（真实层映射到 VARIANT，fake 层直接持有）。
 #[derive(Debug, Clone, PartialEq)]
 pub enum ComValue {
+    /// 逻辑层返回占位；真实路径通过 inherent `LateDispatch::invoke` 直接拿 VARIANT。
+    #[allow(dead_code)]
     Empty,
     /// COM 可选参数缺省值（VT_ERROR / DISP_E_PARAMNOTFOUND）。
     Missing,
@@ -38,6 +40,7 @@ pub enum ComValue {
     I32(i32),
     Str(String),
     /// 对象引用的占位：真实层是 IDispatch 代理，逻辑层只需类型标识。
+    #[allow(dead_code)]
     Object(&'static str),
 }
 
@@ -55,6 +58,10 @@ pub trait Dispatch {
     /// 目标是否具备某成员（能力探测用）。
     fn has_member(&self, name: &str) -> bool;
     /// 执行一次调用。
+    ///
+    /// 生产路径优先走 `LateDispatch` 的 inherent `invoke`（返回 VARIANT）；
+    /// trait 方法保留给可测逻辑层与 FakeDispatch。
+    #[allow(dead_code)]
     fn invoke(&mut self, call: DispatchCall) -> Result<ComValue, CommandError>;
 }
 
@@ -1039,13 +1046,13 @@ mod tests {
         }
         assert_eq!(drops.get(), 3);
 
-        let result: Result<(), ()> = (|| {
+        let result: Result<(), ()> = {
             let _values = [
                 TrackedVariant::new(drops.clone()),
                 TrackedVariant::new(drops.clone()),
             ];
             Err(())
-        })();
+        };
         assert!(result.is_err());
         assert_eq!(drops.get(), 5);
     }
