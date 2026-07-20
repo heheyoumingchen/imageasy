@@ -69,6 +69,7 @@ describe('App bootstrap', () => {
     render(<App />);
 
     await waitFor(() => expect(loadSettings).toHaveBeenCalledTimes(1));
+    expect(await screen.findByRole('button', { name: '打开' })).toBeInTheDocument();
 
     const nav = screen.getByRole('navigation', { name: '主导航' });
     expect(within(nav).getByRole('button', { name: '图片编辑' })).toBeInTheDocument();
@@ -88,7 +89,6 @@ describe('App bootstrap', () => {
     expect(within(topChrome).queryByText('图片编辑工作区')).not.toBeInTheDocument();
     expect(within(topChrome).queryByText('Tauri v2')).not.toBeInTheDocument();
     expect(within(topChrome).queryByText('React 19')).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: '打开' })).toBeInTheDocument();
     expect(screen.getByRole('complementary', { name: '编辑调色面板' })).toBeInTheDocument();
     expect(screen.getByRole('contentinfo')).toBeInTheDocument();
   });
@@ -110,19 +110,22 @@ describe('App bootstrap', () => {
     const user = userEvent.setup();
     render(<App />);
 
+    await screen.findByRole('button', { name: '打开' });
     const topChrome = screen.getAllByRole('banner')[0];
     expect(within(topChrome).queryByText('图片编辑工作区')).not.toBeInTheDocument();
 
     await user.click(screen.getByRole('button', { name: '格式转换' }));
+    await screen.findByRole('button', { name: '开始转换' });
     expect(within(topChrome).queryByText('批量转换工作区')).not.toBeInTheDocument();
 
     await user.click(screen.getByRole('button', { name: '图片提取' }));
+    await screen.findByRole('button', { name: '开始提取' });
     expect(within(topChrome).queryByText('文档图片提取工作区')).not.toBeInTheDocument();
 
     await user.click(screen.getAllByRole('button', { name: '设置' })[0]);
+    expect(await screen.findByTestId('settings-actions-footer')).toBeInTheDocument();
     expect(within(topChrome).queryByText('设置与偏好')).not.toBeInTheDocument();
     expect(screen.queryByRole('heading', { level: 1, name: '设置中心' })).not.toBeInTheDocument();
-    expect(screen.getByTestId('settings-actions-footer')).toBeInTheDocument();
   });
 
   it('switches to the unified conversion workbench from navigation', async () => {
@@ -131,7 +134,7 @@ describe('App bootstrap', () => {
 
     await user.click(screen.getByRole('button', { name: '格式转换' }));
 
-    expect(screen.getByRole('button', { name: '添加文件' })).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: '添加文件' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '导入文件夹' })).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: '开始转换' })).toBeInTheDocument();
     expect(screen.getByRole('complementary', { name: '转换设置区' })).toBeInTheDocument();
@@ -143,10 +146,10 @@ describe('App bootstrap', () => {
 
     await user.click(screen.getByRole('button', { name: '图片下载' }));
 
+    expect(await screen.findByRole('heading', { name: '提取结果' })).toBeInTheDocument();
     expect(screen.queryByRole('heading', { level: 1, name: '图片下载' })).not.toBeInTheDocument();
     expect(screen.queryByRole('tab', { name: '网页图片下载' })).not.toBeInTheDocument();
     expect(screen.queryByRole('tab', { name: '微信公众号图片下载' })).not.toBeInTheDocument();
-    expect(screen.getByRole('heading', { name: '提取结果' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '开始提取' })).toBeInTheDocument();
   });
 
@@ -188,7 +191,7 @@ describe('App bootstrap', () => {
 
     await waitFor(() => expect(loadSettings).toHaveBeenCalledTimes(1));
 
-    expect(screen.getByRole('button', { name: '打开' })).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: '打开' })).toBeInTheDocument();
     expect(screen.queryByRole('heading', { level: 1, name: '任务中心' })).not.toBeInTheDocument();
   });
 });

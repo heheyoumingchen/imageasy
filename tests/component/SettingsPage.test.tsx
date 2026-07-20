@@ -176,7 +176,7 @@ describe('SettingsPage', () => {
     expect(logo.className).toContain('w-14');
     expect(aboutIdentity.className).toContain('gap-3');
     expect(within(aboutIdentity).getByText('imageasy')).toBeInTheDocument();
-    expect(within(aboutIdentity).getByText('v1.0.0')).toBeInTheDocument();
+    expect(within(aboutIdentity).getByText('v0.1.0')).toBeInTheDocument();
   });
 
   it('opens a contact dialog from the about card', async () => {

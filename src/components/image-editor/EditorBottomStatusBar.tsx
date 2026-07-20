@@ -38,7 +38,7 @@ const EditorBottomStatusBar = ({ image, originalName, currentIndex, isEnglish = 
         <div className="font-bold text-meitu bg-meitu-light px-3 py-0.5 rounded-full text-[11px] tabular-nums">
           {totalImages === 0 ? '0 / 0' : `${currentIndex + 1} / ${totalImages}`}
         </div>
-        <span className="font-bold opacity-60">Version: v1.0.0</span>
+        <span className="font-bold opacity-60">Version: v0.1.0</span>
       </div>
     </footer>
   );

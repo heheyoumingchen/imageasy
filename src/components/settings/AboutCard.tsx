@@ -5,7 +5,6 @@ type AboutCardProps = {
     aboutApp: string;
     appName: string;
     appVersion: string;
-    checkForUpdates: string;
     contact: string;
   };
   onOpenContact: () => void;
@@ -41,7 +40,6 @@ export const AboutCard = ({ copy, onOpenContact }: AboutCardProps) => (
         </div>
       </div>
       <div className="flex flex-col gap-3 items-end">
-        <ActionButton>{copy.checkForUpdates}</ActionButton>
         <ActionButton onClick={onOpenContact}>{copy.contact}</ActionButton>
       </div>
     </div>
