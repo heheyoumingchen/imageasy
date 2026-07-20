@@ -1,24 +1,23 @@
 use anyhow::{Context, Result};
 use image::{codecs::jpeg::JpegEncoder, DynamicImage};
-use std::{fs, io::BufWriter, path::PathBuf};
+use std::{fs, io::BufWriter};
+
+use crate::commands::path_guard::{ensure_output_file_path, require_existing_file};
 
 use super::{apply_adjustments, AdjustmentParams, SaveImageAsJpgRequest, SaveImageAsJpgResult};
 
 #[tauri::command]
 pub fn save_image_as_jpg(request: SaveImageAsJpgRequest) -> Result<SaveImageAsJpgResult, String> {
-    save_image_as_jpg_impl(request).map_err(|error| error.to_string())
+    save_image_as_jpg_impl(request).map_err(crate::commands::error_message::to_user_error_string)
 }
 
 fn save_image_as_jpg_impl(request: SaveImageAsJpgRequest) -> Result<SaveImageAsJpgResult> {
-    let source_image = image::open(&request.source_path)
-        .with_context(|| format!("无法打开图片: {}", request.source_path))?;
+    let source_path = require_existing_file(std::path::Path::new(&request.source_path))?;
+    let source_image = image::open(&source_path)
+        .with_context(|| format!("无法打开图片: {}", source_path.display()))?;
     let processed = process_full_image(source_image, &request.adjustments);
 
-    let target_path = PathBuf::from(&request.target_path);
-    if let Some(parent) = target_path.parent() {
-        fs::create_dir_all(parent)
-            .with_context(|| format!("无法创建输出目录: {}", parent.display()))?;
-    }
+    let target_path = ensure_output_file_path(std::path::Path::new(&request.target_path))?;
 
     let quality = request
         .quality

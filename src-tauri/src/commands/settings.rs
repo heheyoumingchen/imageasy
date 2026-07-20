@@ -64,29 +64,61 @@ fn migrate_legacy_settings(value: &mut serde_json::Value) {
     }
 }
 
+/// 非便携模式的平台配置目录：Windows %APPDATA%/imageasy，macOS ~/Library/Application Support/imageasy，Linux $XDG_CONFIG_HOME/imageasy。
+pub fn platform_config_dir() -> Result<PathBuf> {
+    #[cfg(windows)]
+    {
+        let appdata = std::env::var_os("APPDATA").context("无法定位 APPDATA 目录")?;
+        return Ok(PathBuf::from(appdata).join("imageasy"));
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        let home = std::env::var_os("HOME").context("无法定位 HOME 目录")?;
+        return Ok(PathBuf::from(home)
+            .join("Library")
+            .join("Application Support")
+            .join("imageasy"));
+    }
+
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        if let Some(xdg) = std::env::var_os("XDG_CONFIG_HOME") {
+            return Ok(PathBuf::from(xdg).join("imageasy"));
+        }
+        let home = std::env::var_os("HOME").context("无法定位 HOME 目录")?;
+        return Ok(PathBuf::from(home).join(".config").join("imageasy"));
+    }
+
+    #[allow(unreachable_code)]
+    {
+        let mut path = std::env::current_dir().context("无法定位应用目录")?;
+        path.push("imageasy-data");
+        Ok(path)
+    }
+}
+
 fn settings_path() -> Result<PathBuf> {
     if let Some(data_dir) = crate::portable::portable_data_dir() {
         Ok(data_dir.join("settings.json"))
     } else {
-        let mut path = std::env::current_dir().context("无法定位应用目录")?;
-        path.push("settings.json");
-        Ok(path)
+        Ok(platform_config_dir()?.join("settings.json"))
     }
 }
 
 #[tauri::command]
 pub fn load_settings() -> Result<PersistedSettings, String> {
-    load_settings_from_path(&settings_path().map_err(|error| error.to_string())?)
-        .map_err(|error| error.to_string())
+    load_settings_from_path(&settings_path().map_err(crate::commands::error_message::to_user_error_string)?)
+        .map_err(crate::commands::error_message::to_user_error_string)
 }
 
 #[tauri::command]
 pub fn save_settings(settings: PersistedSettings) -> Result<PersistedSettings, String> {
     save_settings_to_path(
-        &settings_path().map_err(|error| error.to_string())?,
+        &settings_path().map_err(crate::commands::error_message::to_user_error_string)?,
         settings,
     )
-    .map_err(|error| error.to_string())
+    .map_err(crate::commands::error_message::to_user_error_string)
 }
 
 pub fn load_settings_from_path(path: &Path) -> Result<PersistedSettings> {
@@ -118,4 +150,17 @@ pub fn save_settings_to_path(
     fs::write(path, raw).with_context(|| format!("无法写入设置文件: {}", path.display()))?;
 
     Ok(settings)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn platform_config_dir_is_not_current_dir_root() {
+        let dir = platform_config_dir().unwrap();
+        let cwd = std::env::current_dir().unwrap();
+        assert_ne!(dir, cwd);
+        assert!(dir.ends_with("imageasy") || dir.to_string_lossy().contains("imageasy"));
+    }
 }

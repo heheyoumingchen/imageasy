@@ -164,20 +164,20 @@ pub struct CommitCropResult {
 #[tauri::command]
 pub async fn open_image_session(path: String) -> Result<OpenImageSessionResult, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        open_image_session_impl(&path).map_err(|error| error.to_string())
+        open_image_session_impl(&path).map_err(crate::commands::error_message::to_user_error_string)
     })
     .await
-    .map_err(|error| error.to_string())?
+    .map_err(crate::commands::error_message::to_user_error_string)?
 }
 
 // 胶片栏缩略图按需生成：前端并行懒加载，避免打开目录时一次性解码全部图片。
 #[tauri::command]
 pub async fn generate_editor_thumbnail(path: String) -> Result<String, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        create_thumbnail_data_url(Path::new(&path), 128, 58).map_err(|error| error.to_string())
+        create_thumbnail_data_url(Path::new(&path), 128, 58).map_err(crate::commands::error_message::to_user_error_string)
     })
     .await
-    .map_err(|error| error.to_string())?
+    .map_err(crate::commands::error_message::to_user_error_string)?
 }
 
 fn open_image_session_impl(path: &str) -> Result<OpenImageSessionResult> {

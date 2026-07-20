@@ -24,10 +24,10 @@ pub async fn generate_image_preview(
     request: GenerateImagePreviewRequest,
 ) -> Result<GenerateImagePreviewResult, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        generate_image_preview_impl(request).map_err(|error| error.to_string())
+        generate_image_preview_impl(request).map_err(crate::commands::error_message::to_user_error_string)
     })
     .await
-    .map_err(|error| error.to_string())?
+    .map_err(crate::commands::error_message::to_user_error_string)?
 }
 
 #[tauri::command]
@@ -42,10 +42,10 @@ pub async fn prefetch_image_preview(request: PrefetchImagePreviewRequest) -> Res
             max_height: Some(preview_height),
         })
         .map(|_| ())
-        .map_err(|error| error.to_string())
+        .map_err(crate::commands::error_message::to_user_error_string)
     })
     .await
-    .map_err(|error| error.to_string())?
+    .map_err(crate::commands::error_message::to_user_error_string)?
 }
 
 fn is_identity_adjustments(adjustments: &super::AdjustmentParams) -> bool {

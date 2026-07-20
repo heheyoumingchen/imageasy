@@ -108,10 +108,11 @@ pub(super) fn render_cover_tile(
         decoded_size.height,
     );
     let cropped = decoded.crop_imm(crop_x, crop_y, crop_width, crop_height);
+    // CatmullRom 比 Lanczos3 明显更快，导出观感差异很小。
     let resized = cropped.resize_exact(
         roi.destination.width,
         roi.destination.height,
-        FilterType::Lanczos3,
+        FilterType::CatmullRom,
     );
     let mut tile = RgbaImage::from_pixel(cell.width, cell.height, Rgba([0, 0, 0, 0]));
     imageops::overlay(
@@ -149,7 +150,7 @@ pub(super) fn render_cover_tile_from_image(
     let resized = cropped.resize_exact(
         roi.destination.width,
         roi.destination.height,
-        FilterType::Lanczos3,
+        FilterType::CatmullRom,
     );
     let mut tile = RgbaImage::from_pixel(cell.width, cell.height, Rgba([0, 0, 0, 0]));
     imageops::overlay(
@@ -179,34 +180,39 @@ pub(super) fn composite_tile(
     let width = tile.width() as i64;
     let height = tile.height() as i64;
     let radius_i64 = radius as i64;
+    let radius_sq = radius_i64 * radius_i64;
 
-    for y in 0..tile.height() {
-        for x in 0..tile.width() {
-            let x_i64 = x as i64;
-            let y_i64 = y as i64;
-            let inside_corner = if x < radius && y < radius {
-                let dx = x_i64 - radius_i64;
-                let dy = y_i64 - radius_i64;
-                dx * dx + dy * dy <= radius_i64 * radius_i64
-            } else if x >= tile.width() - radius && y < radius {
-                let dx = x_i64 - (width - radius_i64 - 1);
-                let dy = y_i64 - radius_i64;
-                dx * dx + dy * dy <= radius_i64 * radius_i64
-            } else if x < radius && y >= tile.height() - radius {
-                let dx = x_i64 - radius_i64;
-                let dy = y_i64 - (height - radius_i64 - 1);
-                dx * dx + dy * dy <= radius_i64 * radius_i64
-            } else if x >= tile.width() - radius && y >= tile.height() - radius {
-                let dx = x_i64 - (width - radius_i64 - 1);
-                let dy = y_i64 - (height - radius_i64 - 1);
-                dx * dx + dy * dy <= radius_i64 * radius_i64
-            } else {
-                true
-            };
+    // 圆角圆心取“内缩 radius 的角点”：左/上用 radius，右/下用 (size - 1 - radius)。
+    // 只扫四个圆角区域，避免整 tile 像素双重循环。
+    let clear_outside = |tile: &mut RgbaImage, x: u32, y: u32, cx: i64, cy: i64| {
+        let dx = x as i64 - cx;
+        let dy = y as i64 - cy;
+        if dx * dx + dy * dy > radius_sq {
+            tile.get_pixel_mut(x, y).0[3] = 0;
+        }
+    };
 
-            if !inside_corner {
-                tile.get_pixel_mut(x, y).0[3] = 0;
-            }
+    let right_cx = width - radius_i64 - 1;
+    let bottom_cy = height - radius_i64 - 1;
+
+    for y in 0..radius {
+        for x in 0..radius {
+            clear_outside(&mut tile, x, y, radius_i64, radius_i64);
+        }
+    }
+    for y in 0..radius {
+        for x in (tile.width() - radius)..tile.width() {
+            clear_outside(&mut tile, x, y, right_cx, radius_i64);
+        }
+    }
+    for y in (tile.height() - radius)..tile.height() {
+        for x in 0..radius {
+            clear_outside(&mut tile, x, y, radius_i64, bottom_cy);
+        }
+    }
+    for y in (tile.height() - radius)..tile.height() {
+        for x in (tile.width() - radius)..tile.width() {
+            clear_outside(&mut tile, x, y, right_cx, bottom_cy);
         }
     }
 
@@ -232,6 +238,22 @@ mod tests {
         composite_tile(&mut actual, tile, DestinationPlacement { x: 3, y: 5 }, 0);
 
         assert_eq!(actual.as_raw(), expected.as_raw());
+    }
+
+    #[test]
+    fn rounded_corners_only_clear_corner_pixels() {
+        let background = Rgba([10, 20, 30, 255]);
+        let mut canvas = ImageBuffer::from_pixel(20, 20, background);
+        let tile = ImageBuffer::from_pixel(10, 10, Rgba([200, 100, 50, 255]));
+        composite_tile(&mut canvas, tile, DestinationPlacement { x: 5, y: 5 }, 3);
+
+        // 圆角外侧 alpha 置 0 后 overlay 会保留背景色；中心与边中点仍为前景实色。
+        assert_eq!(*canvas.get_pixel(5, 5), background);
+        assert_eq!(*canvas.get_pixel(14, 5), background);
+        assert_eq!(*canvas.get_pixel(5, 14), background);
+        assert_eq!(*canvas.get_pixel(14, 14), background);
+        assert_eq!(canvas.get_pixel(10, 10).0, [200, 100, 50, 255]);
+        assert_eq!(canvas.get_pixel(10, 5).0, [200, 100, 50, 255]);
     }
 
     #[test]

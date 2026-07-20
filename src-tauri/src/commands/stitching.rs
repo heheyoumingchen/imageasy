@@ -1,5 +1,8 @@
-use super::common::{
-    apply_color_mode, current_date_stamp, extension, normalized_format, write_dynamic_image,
+use super::{
+    common::{
+        apply_color_mode, current_date_stamp, extension, normalized_format, write_dynamic_image,
+    },
+    path_guard::ensure_output_directory,
 };
 use anyhow::{Context, Result};
 use base64::{engine::general_purpose::STANDARD, Engine as _};
@@ -239,10 +242,10 @@ pub struct StitchImageFilesResult {
 #[tauri::command]
 pub async fn inspect_stitching_file(path: String) -> Result<InspectStitchingFileResult, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        inspect_stitching_file_impl(&path).map_err(|error| error.to_string())
+        inspect_stitching_file_impl(&path).map_err(crate::commands::error_message::to_user_error_string)
     })
     .await
-    .map_err(|error| error.to_string())?
+    .map_err(crate::commands::error_message::to_user_error_string)?
 }
 
 #[tauri::command]
@@ -250,10 +253,10 @@ pub async fn inspect_stitching_directory(
     path: String,
 ) -> Result<Vec<InspectStitchingFileResult>, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        inspect_stitching_directory_impl(&path).map_err(|error| error.to_string())
+        inspect_stitching_directory_impl(&path).map_err(crate::commands::error_message::to_user_error_string)
     })
     .await
-    .map_err(|error| error.to_string())?
+    .map_err(crate::commands::error_message::to_user_error_string)?
 }
 
 #[tauri::command]
@@ -261,10 +264,10 @@ pub async fn stitch_image_files(
     request: StitchImageFilesRequest,
 ) -> Result<StitchImageFilesResult, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        stitch_image_files_impl(request).map_err(|error| error.to_string())
+        stitch_image_files_impl(request).map_err(crate::commands::error_message::to_user_error_string)
     })
     .await
-    .map_err(|error| error.to_string())?
+    .map_err(crate::commands::error_message::to_user_error_string)?
 }
 
 fn source_name(path: &Path, fallback: &str) -> String {
@@ -563,55 +566,79 @@ fn stitch_image_files_impl(request: StitchImageFilesRequest) -> Result<StitchIma
         canvas_height,
         background,
     ));
-    let mut first_source: Option<PathBuf> = None;
-    let mut stitched_count = 0u32;
 
-    for cell in request
+    struct PreparedCell {
+        source: PathBuf,
+        source_label: String,
+        rect: Rect,
+        scale: f32,
+        offset_x: f32,
+        offset_y: f32,
+    }
+
+    let prepared: Vec<PreparedCell> = request
         .cells
         .iter()
         .filter(|cell| !cell.source_path.trim().is_empty())
+        .map(|cell| {
+            let rect = layout_rect(&request, cell, canvas_width, canvas_height)?;
+            let source = PathBuf::from(&cell.source_path);
+            let source_label = source_name(&source, &cell.source_path);
+            Ok(PreparedCell {
+                source,
+                source_label,
+                rect,
+                scale: cell.scale,
+                offset_x: cell.offset_x,
+                offset_y: cell.offset_y,
+            })
+        })
+        .collect::<Result<Vec<_>>>()?;
+
+    let first_source = prepared.first().map(|cell| cell.source.clone());
+    let stitched_count = prepared.len() as u32;
+
+    // 解码/裁剪/缩放互不依赖，并行出 tile 后再按原顺序合成。
+    let tiles = prepared
+        .par_iter()
+        .map(|cell| {
+            let dimensions = image::image_dimensions(&cell.source).with_context(|| {
+                format!("无法读取图片尺寸: {}", cell.source_label)
+            })?;
+            let placed = image_pipeline::render_cover_tile(
+                &cell.source,
+                geometry::Size {
+                    width: dimensions.0,
+                    height: dimensions.1,
+                },
+                geometry::Size {
+                    width: cell.rect.width,
+                    height: cell.rect.height,
+                },
+                cell.scale,
+                cell.offset_x,
+                cell.offset_y,
+            )?;
+            Ok((cell.rect, placed))
+        })
+        .collect::<Result<Vec<_>>>()?;
+
     {
-        let rect = layout_rect(&request, cell, canvas_width, canvas_height)?;
-        let source = PathBuf::from(&cell.source_path);
-        if first_source.is_none() {
-            first_source = Some(source.clone());
-        }
-        let dimensions = image::image_dimensions(&source).with_context(|| {
-            format!(
-                "无法读取图片尺寸: {}",
-                source_name(&source, &cell.source_path)
-            )
-        })?;
-        let placed = image_pipeline::render_cover_tile(
-            &source,
-            geometry::Size {
-                width: dimensions.0,
-                height: dimensions.1,
-            },
-            geometry::Size {
-                width: rect.width,
-                height: rect.height,
-            },
-            cell.scale,
-            cell.offset_x,
-            cell.offset_y,
-        )?;
         let canvas = canvas.as_mut_rgba8().context("拼接画布不是 RGBA 图像")?;
-        image_pipeline::composite_tile(
-            canvas,
-            placed,
-            image_pipeline::DestinationPlacement {
-                x: rect.x.into(),
-                y: rect.y.into(),
-            },
-            request.border_radius,
-        );
-        stitched_count += 1;
+        for (rect, placed) in tiles {
+            image_pipeline::composite_tile(
+                canvas,
+                placed,
+                image_pipeline::DestinationPlacement {
+                    x: rect.x.into(),
+                    y: rect.y.into(),
+                },
+                request.border_radius,
+            );
+        }
     }
 
-    let output_directory = PathBuf::from(&request.output_directory);
-    fs::create_dir_all(&output_directory)
-        .with_context(|| format!("无法创建输出目录: {}", output_directory.display()))?;
+    let output_directory = ensure_output_directory(Path::new(&request.output_directory))?;
     let base_stem = first_source
         .as_ref()
         .map(|path| stem(path))

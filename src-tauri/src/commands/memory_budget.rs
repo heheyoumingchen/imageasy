@@ -47,10 +47,12 @@ impl MemoryBudget {
         }
     }
 
+    #[cfg(test)]
     pub(crate) fn capacity_bytes(&self) -> u64 {
         self.capacity_bytes
     }
 
+    #[cfg(test)]
     pub(crate) fn available_permits(&self) -> usize {
         self.semaphore.available_permits()
     }

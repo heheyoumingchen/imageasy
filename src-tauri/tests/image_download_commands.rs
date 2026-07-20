@@ -2,8 +2,9 @@ use imageasy_lib::commands::image_download::{
     apply_image_response_metadata, build_safe_output_name, infer_download_extension,
     infer_format_from_source, inspect_download_source_from_html, metadata_event_payload_for,
     metadata_probe_candidates_for, parse_webpage_images, parse_wechat_article_images,
-    thumbnail_cache_key_for, thumbnail_cache_path_for,
+    thumbnail_cache_key_for, thumbnail_cache_path_for, validate_resolved_addresses,
 };
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
 #[test]
 fn thumbnail_cache_key_is_stable_for_same_source_url() {
@@ -75,6 +76,21 @@ fn inspect_download_source_rejects_private_ip_https_url() {
 
     assert!(result.is_err());
     assert!(result.unwrap_err().to_string().contains("公开 HTTPS"));
+}
+
+#[test]
+fn validate_resolved_addresses_rejects_empty_and_private_records() {
+    assert!(validate_resolved_addresses(&[]).is_err());
+    assert!(validate_resolved_addresses(&[IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1))]).is_err());
+    assert!(validate_resolved_addresses(&[IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1))]).is_err());
+    assert!(validate_resolved_addresses(&[IpAddr::V6(Ipv6Addr::LOCALHOST)]).is_err());
+    // 混合记录中只要有一个私网地址就拒绝，防止 rebinding 夹带。
+    assert!(validate_resolved_addresses(&[
+        IpAddr::V4(Ipv4Addr::new(93, 184, 216, 34)),
+        IpAddr::V4(Ipv4Addr::new(192, 168, 0, 8)),
+    ])
+    .is_err());
+    assert!(validate_resolved_addresses(&[IpAddr::V4(Ipv4Addr::new(93, 184, 216, 34))]).is_ok());
 }
 
 #[test]

@@ -36,7 +36,7 @@ fn stable_image_id(normalized_url: &str) -> String {
 
 pub fn infer_format_from_source(source: &str) -> Option<String> {
     let url = url::Url::parse(source).ok()?;
-    let last = url.path_segments()?.last()?;
+    let last = url.path_segments()?.next_back()?;
     let ext = last
         .rsplit_once('.')
         .map(|(_, ext)| ext)
@@ -148,7 +148,7 @@ fn collect_images_from_html(
             .attr("srcset")
             .unwrap_or_default()
             .split(',')
-            .filter_map(|entry| entry.trim().split_whitespace().next())
+            .filter_map(|entry| entry.split_whitespace().next())
             .filter(|s| !s.is_empty() && !s.starts_with("data:"))
             .map(|s| s.to_string())
             .collect();
@@ -175,7 +175,7 @@ fn collect_images_from_html(
             .attr("srcset")
             .unwrap_or_default()
             .split(',')
-            .filter_map(|entry| entry.trim().split_whitespace().next())
+            .filter_map(|entry| entry.split_whitespace().next())
             .filter(|s| !s.is_empty() && !s.starts_with("data:"))
             .map(|s| s.to_string())
             .collect();
@@ -213,7 +213,7 @@ fn push_image_item(
 
     let name = normalized
         .path_segments()
-        .and_then(|segments| segments.last())
+        .and_then(|mut segments| segments.next_back())
         .filter(|segment| !segment.is_empty())
         .unwrap_or("image")
         .to_string();

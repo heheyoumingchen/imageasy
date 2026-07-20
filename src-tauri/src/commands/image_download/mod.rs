@@ -7,12 +7,13 @@ use serde::{Deserialize, Serialize};
 use std::{
     fs::{File, OpenOptions},
     io::{ErrorKind, Read, Write},
-    net::{Ipv4Addr, Ipv6Addr},
+    net::{IpAddr, Ipv4Addr, Ipv6Addr, ToSocketAddrs},
     path::{Path, PathBuf},
     time::Duration,
 };
 use tauri::{Emitter, Window};
 
+use crate::commands::path_guard::ensure_output_directory;
 use parser::extract_page_title;
 
 #[derive(Debug, Deserialize)]
@@ -101,6 +102,13 @@ pub(crate) fn validate_public_https_url(input: &str) -> Result<url::Url> {
     Ok(parsed)
 }
 
+/// 校验 URL 字面量后，再解析 DNS 并对全部 A/AAAA 记录做公网地址校验，降低 rebinding 风险。
+pub(crate) fn validate_public_https_url_resolved(input: &str) -> Result<url::Url> {
+    let parsed = validate_public_https_url(input)?;
+    validate_resolved_public_host(&parsed)?;
+    Ok(parsed)
+}
+
 fn validate_public_domain(domain: &str) -> Result<()> {
     let normalized = domain.trim_end_matches('.').to_ascii_lowercase();
     if normalized.is_empty()
@@ -113,6 +121,40 @@ fn validate_public_domain(domain: &str) -> Result<()> {
     }
 
     Ok(())
+}
+
+/// 供测试与请求前复用：拒绝空解析结果与任一私网/保留地址。
+pub fn validate_resolved_addresses(addresses: &[IpAddr]) -> Result<()> {
+    if addresses.is_empty() {
+        bail!("无法解析主机地址");
+    }
+
+    for address in addresses {
+        match address {
+            IpAddr::V4(v4) => validate_public_ipv4(*v4)?,
+            IpAddr::V6(v6) => validate_public_ipv6(*v6)?,
+        }
+    }
+
+    Ok(())
+}
+
+fn validate_resolved_public_host(url: &url::Url) -> Result<()> {
+    let host = url.host_str().context("仅支持公开 HTTPS 链接")?;
+
+    // 字面量 IP 已在 validate_public_https_url 校验过，这里再走一遍保持统一。
+    if let Ok(ip) = host.parse::<IpAddr>() {
+        return validate_resolved_addresses(&[ip]);
+    }
+
+    let port = url.port_or_known_default().unwrap_or(443);
+    let resolved = (host, port)
+        .to_socket_addrs()
+        .with_context(|| format!("无法解析主机: {host}"))?
+        .map(|socket| socket.ip())
+        .collect::<Vec<_>>();
+
+    validate_resolved_addresses(&resolved)
 }
 
 fn validate_public_ipv4(address: Ipv4Addr) -> Result<()> {
@@ -376,7 +418,8 @@ fn fetch_response(
         .redirects(0)
         .timeout(timeout)
         .build();
-    let mut current = validate_public_https_url(url)?;
+    // 每次请求前解析 DNS，避免仅校验字面 host 时被 rebinding 绕过。
+    let mut current = validate_public_https_url_resolved(url)?;
 
     for _ in 0..=MAX_REDIRECTS {
         let mut request = agent.get(current.as_str()).set("User-Agent", USER_AGENT);
@@ -393,7 +436,7 @@ fn fetch_response(
         if (300..400).contains(&response.status()) {
             let location = response.header("Location").context("重定向缺少目标")?;
             let next = current.join(location).context("无效重定向链接")?;
-            current = validate_public_https_url(next.as_str())?;
+            current = validate_public_https_url_resolved(next.as_str())?;
             continue;
         }
 
@@ -412,7 +455,7 @@ fn fetch_head_response(
         .redirects(0)
         .timeout(timeout)
         .build();
-    let mut current = validate_public_https_url(url)?;
+    let mut current = validate_public_https_url_resolved(url)?;
 
     for _ in 0..=MAX_REDIRECTS {
         let mut request = agent.head(current.as_str()).set("User-Agent", USER_AGENT);
@@ -429,7 +472,7 @@ fn fetch_head_response(
         if (300..400).contains(&response.status()) {
             let location = response.header("Location").context("重定向缺少目标")?;
             let next = current.join(location).context("无效重定向链接")?;
-            current = validate_public_https_url(next.as_str())?;
+            current = validate_public_https_url_resolved(next.as_str())?;
             continue;
         }
 
@@ -512,7 +555,7 @@ fn inspect_download_source_impl(
     window: Window,
 ) -> Result<InspectDownloadSourceResult> {
     validate_mode(&request.mode)?;
-    let url = validate_public_https_url(request.url.trim())?;
+    let url = validate_public_https_url_resolved(request.url.trim())?;
     let html = fetch_html(url.as_str())?;
     let result = inspect_download_source_from_html(&request.mode, url.as_str(), &html)?;
     spawn_metadata_probe(window, url, metadata_probe_candidates_for(&result.images));
@@ -523,14 +566,11 @@ fn save_download_images_impl(
     request: SaveDownloadImagesRequest,
 ) -> Result<SaveDownloadImagesResult> {
     validate_mode(&request.mode)?;
-    let page_url = validate_public_https_url(request.page_url.trim())?;
+    let page_url = validate_public_https_url_resolved(request.page_url.trim())?;
     if request.image_ids.is_empty() {
         bail!("请先选择图片");
     }
-    let output_dir = PathBuf::from(request.output_directory.trim());
-    if !output_dir.is_dir() {
-        bail!("输出目录无效");
-    }
+    let output_dir = ensure_output_directory(Path::new(request.output_directory.trim()))?;
 
     let html = fetch_html(page_url.as_str())?;
     let inspect = inspect_download_source_from_html(&request.mode, page_url.as_str(), &html)?;
@@ -561,12 +601,12 @@ pub async fn inspect_download_source(
     request: InspectDownloadSourceRequest,
     window: Window,
 ) -> Result<InspectDownloadSourceResult, String> {
-    inspect_download_source_impl(request, window).map_err(|error| error.to_string())
+    inspect_download_source_impl(request, window).map_err(crate::commands::error_message::to_user_error_string)
 }
 
 #[tauri::command]
 pub async fn save_download_images(
     request: SaveDownloadImagesRequest,
 ) -> Result<SaveDownloadImagesResult, String> {
-    save_download_images_impl(request).map_err(|error| error.to_string())
+    save_download_images_impl(request).map_err(crate::commands::error_message::to_user_error_string)
 }
