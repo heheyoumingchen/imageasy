@@ -36,6 +36,7 @@ export type SplitImageFileRequest = {
   quality: number;
   namingPattern: SplittingNamingPattern;
   includeOutputPaths?: boolean;
+  taskId?: string;
 };
 
 export type SplitImageFileResult = {

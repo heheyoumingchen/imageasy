@@ -1,18 +1,17 @@
 use super::{
+    cancellation::{self, TaskGuard},
     common::{
         apply_color_mode, current_date_stamp, extension, normalized_format, write_dynamic_image,
     },
-    pdf_rendering::render_pdf_pages_with_callback,
+    path_guard::{ensure_output_directory, require_existing_file},
+    pdf_rendering::{render_pdf_pages_with_format, BitmapOutputFormat},
 };
 use anyhow::{Context, Result};
 use image::{DynamicImage, GenericImageView};
 use lopdf::Document as LoDocument;
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
-use std::{
-    fs,
-    path::{Path, PathBuf},
-};
+use std::path::{Path, PathBuf};
 use tauri::Manager;
 use walkdir::WalkDir;
 
@@ -55,6 +54,9 @@ pub struct SplitImageFileRequest {
     pub naming_pattern: String,
     #[serde(default)]
     pub include_output_paths: Option<bool>,
+    /// 批次取消令牌 id；缺省表示不可取消。
+    #[serde(default)]
+    pub task_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -68,10 +70,10 @@ pub struct SplitImageFileResult {
 #[tauri::command]
 pub async fn inspect_splitting_file(path: String) -> Result<InspectSplittingFileResult, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        inspect_splitting_file_impl(&path).map_err(|error| error.to_string())
+        inspect_splitting_file_impl(&path).map_err(crate::commands::error_message::to_user_error_string)
     })
     .await
-    .map_err(|error| error.to_string())?
+    .map_err(crate::commands::error_message::to_user_error_string)?
 }
 
 #[tauri::command]
@@ -79,10 +81,10 @@ pub async fn inspect_splitting_directory(
     path: String,
 ) -> Result<Vec<InspectSplittingFileResult>, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        inspect_splitting_directory_impl(&path).map_err(|error| error.to_string())
+        inspect_splitting_directory_impl(&path).map_err(crate::commands::error_message::to_user_error_string)
     })
     .await
-    .map_err(|error| error.to_string())?
+    .map_err(crate::commands::error_message::to_user_error_string)?
 }
 
 #[tauri::command]
@@ -92,10 +94,10 @@ pub async fn split_image_file(
 ) -> Result<SplitImageFileResult, String> {
     let resource_dir = app.path().resource_dir().ok();
     tauri::async_runtime::spawn_blocking(move || {
-        split_image_file_impl(request, resource_dir).map_err(|error| error.to_string())
+        split_image_file_impl(request, resource_dir).map_err(crate::commands::error_message::to_user_error_string)
     })
     .await
-    .map_err(|error| error.to_string())?
+    .map_err(crate::commands::error_message::to_user_error_string)?
 }
 
 pub fn split_image_file_with_resource_dir(
@@ -273,6 +275,7 @@ fn split_grid(image: &DynamicImage, columns: u32, rows: u32) -> Result<Vec<Dynam
     Ok(outputs)
 }
 
+#[allow(clippy::too_many_arguments)]
 fn write_split_outputs(
     source_stem: &str,
     output_directory: &Path,
@@ -315,12 +318,13 @@ fn split_image_file_impl(
     request: SplitImageFileRequest,
     resource_dir: Option<PathBuf>,
 ) -> Result<SplitImageFileResult> {
+    let _guard = TaskGuard::new(request.task_id.clone());
+    let token = cancellation::token_for(request.task_id.as_deref());
+    cancellation::check_optional(token.as_ref())?;
     validate_request(&request)?;
 
-    let source = PathBuf::from(&request.source_path);
-    let output_directory = PathBuf::from(&request.output_directory);
-    fs::create_dir_all(&output_directory)
-        .with_context(|| format!("无法创建输出目录: {}", output_directory.display()))?;
+    let source = require_existing_file(Path::new(&request.source_path))?;
+    let output_directory = ensure_output_directory(Path::new(&request.output_directory))?;
 
     let mut output_paths = Vec::new();
     let mut written_count = 0;
@@ -330,6 +334,7 @@ fn split_image_file_impl(
     let mut next_index = 1;
 
     if is_supported_image(&source) {
+        cancellation::check_optional(token.as_ref())?;
         let image =
             image::open(&source).with_context(|| format!("无法打开图片: {}", source.display()))?;
         write_split_outputs(
@@ -345,12 +350,14 @@ fn split_image_file_impl(
         )?;
     } else if extension(&source) == "pdf" {
         let mut rendered_count = 0;
-        render_pdf_pages_with_callback(
+        render_pdf_pages_with_format(
             &source,
             resource_dir.as_deref(),
             &[],
             "standard",
+            BitmapOutputFormat::Rgb,
             |rendered_page| {
+                cancellation::check_optional(token.as_ref())?;
                 rendered_count += 1;
                 write_split_outputs(
                     &source_stem,
@@ -364,6 +371,7 @@ fn split_image_file_impl(
                     include_output_paths,
                 )
             },
+            token.as_ref(),
         )?;
         if rendered_count == 0 {
             anyhow::bail!("PDF 没有可分割页面");

@@ -18,6 +18,7 @@ export type ExtractDocumentImagesRequest = {
   quality: number;
   namingPattern: ExtractionNamingPattern;
   includeOutputPaths?: boolean;
+  taskId?: string;
 };
 
 export type ExtractDocumentImagesResult = {

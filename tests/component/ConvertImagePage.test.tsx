@@ -28,8 +28,17 @@ vi.mock('../../src/services/conversionCommands', () => ({
   renderDocumentToImages: vi.fn()
 }));
 
+vi.mock('../../src/services/batchTaskCommands', () => ({
+  createBatchTaskId: vi.fn(() => 'convert-test-task'),
+  registerBatchTask: vi.fn(async () => undefined),
+  cancelBatchTask: vi.fn(async () => undefined),
+  completeBatchTask: vi.fn(async () => undefined),
+  isCancelledError: vi.fn((error: unknown) => String(error).includes('任务已取消'))
+}));
+
 const { openConversionSources, openConversionFiles, chooseOutputDirectory, openDirectoryInSystem } = await import('../../src/services/fileDialog');
 const { inspectConversionFile, inspectConversionDirectory, convertImageFile, renderDocumentToImages } = await import('../../src/services/conversionCommands');
+const { cancelBatchTask, registerBatchTask } = await import('../../src/services/batchTaskCommands');
 
 const inspectedJpgFile = {
   kind: 'image' as const,
@@ -175,6 +184,46 @@ describe('ConvertImagePage', () => {
     expect(screen.getByText('暂无待处理文件')).toBeInTheDocument();
   });
 
+  it('imports PDF even when page-count inspection soft-fails and keeps it selectable', async () => {
+    const user = userEvent.setup();
+    vi.mocked(openConversionSources).mockResolvedValue({
+      files: ['F:/demo/陈胜、扶苏、蒙恬和阳城.pdf'],
+      directories: [],
+      cancelled: false
+    });
+    vi.mocked(inspectConversionFile).mockResolvedValue({
+      kind: 'document',
+      sourcePath: 'F:/demo/陈胜、扶苏、蒙恬和阳城.pdf',
+      sourceName: '陈胜、扶苏、蒙恬和阳城.pdf',
+      imageMetadata: null,
+      documentMetadata: { pageCount: null, extension: 'pdf' },
+      errorMessage: '已导入，但暂无法读取页数：无法读取 PDF 页数'
+    });
+
+    render(<ConvertImagePage />);
+    await user.click(screen.getByRole('button', { name: '添加文件' }));
+
+    expect(await screen.findByText('陈胜、扶苏、蒙恬和阳城.pdf')).toBeInTheDocument();
+    expect(screen.getByText(/已导入，但暂无法读取页数/)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '开始转换' })).toBeEnabled();
+  });
+
+  it('surfaces inspect failures without unhandled rejection when a file inspect throws', async () => {
+    const user = userEvent.setup();
+    vi.mocked(openConversionSources).mockResolvedValue({
+      files: ['F:/demo/broken.pdf'],
+      directories: [],
+      cancelled: false
+    });
+    vi.mocked(inspectConversionFile).mockRejectedValue('无法读取 PDF 页数: [path:broken.pdf]');
+
+    render(<ConvertImagePage />);
+    await user.click(screen.getByRole('button', { name: '添加文件' }));
+
+    expect(await screen.findByText(/无法读取 PDF 页数/)).toBeInTheDocument();
+    expect(screen.queryByText('broken.pdf')).not.toBeInTheDocument();
+  });
+
   it('imports a file and defaults output directory to its folder under same-as-source', async () => {
     const user = userEvent.setup();
     vi.mocked(openConversionFiles).mockResolvedValue(['F:/demo/a.jpg']);
@@ -229,6 +278,76 @@ describe('ConvertImagePage', () => {
         expect.objectContaining({ outputPath: 'F:/picked/a-001.jpg' })
       );
     });
+  });
+
+  it('cancels a running conversion batch and leaves remaining items ready', async () => {
+    const user = userEvent.setup();
+    getSettingsStore().setState({
+      outputDirectoryStrategy: 'custom',
+      defaultOutputDirectory: 'F:/picked',
+      maxConcurrency: 1
+    });
+
+    let resolveFirst: (() => void) | undefined;
+    const firstGate = new Promise<string[]>((resolve) => {
+      resolveFirst = () => resolve(['F:/picked/a-001.jpg']);
+    });
+    vi.mocked(convertImageFile)
+      .mockImplementationOnce(async () => firstGate)
+      .mockResolvedValue(['F:/picked/b-001.jpg']);
+
+    render(<ConvertImagePage />);
+
+    act(() => {
+      useConversionStore.getState().setItems([
+        {
+          id: 'a',
+          sourcePath: 'F:/demo/a.jpg',
+          sourceName: 'a.jpg',
+          sourceStem: 'a',
+          kind: 'image',
+          status: 'ready',
+          errorMessage: null,
+          outputSettingsOverride: {},
+          imageMetadata: { width: 800, height: 600, extension: 'jpg' },
+          documentMetadata: null,
+          selected: true,
+          outputPaths: []
+        },
+        {
+          id: 'b',
+          sourcePath: 'F:/demo/b.jpg',
+          sourceName: 'b.jpg',
+          sourceStem: 'b',
+          kind: 'image',
+          status: 'ready',
+          errorMessage: null,
+          outputSettingsOverride: {},
+          imageMetadata: { width: 800, height: 600, extension: 'jpg' },
+          documentMetadata: null,
+          selected: true,
+          outputPaths: []
+        }
+      ]);
+    });
+
+    await user.click(screen.getByRole('button', { name: '开始转换' }));
+    expect(await screen.findByRole('button', { name: '取消' })).toBeInTheDocument();
+
+    await waitFor(() => {
+      expect(registerBatchTask).toHaveBeenCalledWith('convert-test-task');
+      expect(convertImageFile).toHaveBeenCalledTimes(1);
+    });
+
+    await user.click(screen.getByRole('button', { name: '取消' }));
+    expect(cancelBatchTask).toHaveBeenCalledWith('convert-test-task');
+    resolveFirst?.();
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: '开始转换' })).toBeInTheDocument();
+    });
+    expect(convertImageFile).toHaveBeenCalledTimes(1);
+    expect(useConversionStore.getState().items.find((item) => item.id === 'b')?.status).toBe('ready');
   });
 
   it('opens the output directory inferred from the imported source', async () => {
@@ -401,7 +520,8 @@ describe('ConvertImagePage', () => {
         outputFormat: 'png',
         colorMode: 'rgb',
         quality: 100,
-        allowSourceOverwrite: false
+        allowSourceOverwrite: false,
+        taskId: 'convert-test-task'
       });
     });
   });
@@ -652,7 +772,7 @@ describe('ConvertImagePage', () => {
     await user.click(screen.getByRole('button', { name: '开始转换' }));
 
     expect(
-      await screen.findByText('DOC/DOCX 转图片需要 Microsoft Word 或 WPS Office。PDF 转图片不受影响。')
+      await screen.findByText(/DOC\/DOCX 转图片未能连接 Microsoft Word 或 WPS Office/)
     ).toBeInTheDocument();
     expect(screen.getByText('失败')).toBeInTheDocument();
   });
@@ -790,7 +910,8 @@ describe('ConvertImagePage', () => {
       outputFormat: 'png',
       colorMode: 'cmyk',
       quality: 100,
-      allowSourceOverwrite: false
+      allowSourceOverwrite: false,
+      taskId: 'convert-test-task'
     });
   });
 
@@ -861,7 +982,8 @@ describe('ConvertImagePage', () => {
       quality: 100,
       pageNumbers: [1, 3],
       renderDensity: 'standard',
-      namingPattern: 'source-name-index'
+      namingPattern: 'source-name-index',
+      taskId: 'convert-test-task'
     });
   });
 

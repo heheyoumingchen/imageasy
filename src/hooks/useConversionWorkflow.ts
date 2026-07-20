@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import {
   convertImageFile,
   inspectConversionDirectory,
@@ -13,8 +13,13 @@ import type { ConversionItem, ConversionOutputFormat, ConversionColorMode, Conve
 import { buildImageOutputName, joinOutputPath, willOverwriteSource } from '../utils/conversionOutputPaths';
 import { expandPageRange } from '../utils/pageRange';
 import { sourceDirectory } from '../utils/paths';
-import { toErrorMessage } from '../utils/errors';
-import { runConcurrentQueue } from '../utils/batchQueue';
+import { normalizeConversionError, toErrorMessage } from '../utils/errors';
+import { createBatchQueueControl, runConcurrentQueue, type BatchQueueControl } from '../utils/batchQueue';
+import {
+  cancelBatchTask,
+  createBatchTaskId,
+  registerBatchTask
+} from '../services/batchTaskCommands';
 
 // 转换专属参数（来自 conversionStore）与公共导出设置（来自 exportSettings）合并后的批次快照。
 type ConversionBatchSettings = ConversionOutputSettings & {
@@ -99,17 +104,55 @@ export const useConversionWorkflow = () => {
   const [isRunning, setIsRunning] = useState(false);
   const [pageError, setPageError] = useState<string | null>(null);
   const [failedDetailsOpen, setFailedDetailsOpen] = useState(false);
+  const batchControlRef = useRef<BatchQueueControl | null>(null);
+  const batchTaskIdRef = useRef<string | null>(null);
 
   const importSources = async (sources: { files: string[]; directories: string[]; cancelled: boolean }) => {
     if (sources.cancelled) {
       return;
     }
+    setPageError(null);
     const fallbackFiles = sources.files.length === 0 && sources.directories.length === 0 ? await openConversionFiles() : [];
     const sourceFiles = [...sources.files, ...fallbackFiles];
-    const fileItems = await Promise.all(sourceFiles.map((path) => inspectConversionFile(path)));
-    const directoryItemGroups = await Promise.all(sources.directories.map((path) => inspectConversionDirectory(path)));
-    const supportedItems = [...fileItems, ...directoryItemGroups.flat()].filter((item) => item.kind !== 'unsupported').map(toItem);
+
+    // 逐项 inspect：单文件失败不拖垮整批导入（此前 PDF 读页数失败会 Unhandled rejection）。
+    const fileResults = await Promise.all(
+      sourceFiles.map(async (path) => {
+        try {
+          return await inspectConversionFile(path);
+        } catch (error) {
+          return {
+            kind: 'unsupported' as const,
+            sourcePath: path,
+            sourceName: path.replace(/^.*[\\/]/, ''),
+            imageMetadata: null,
+            documentMetadata: null,
+            errorMessage: toErrorMessage(error)
+          };
+        }
+      })
+    );
+    const directoryResults = await Promise.all(
+      sources.directories.map(async (path) => {
+        try {
+          return await inspectConversionDirectory(path);
+        } catch (error) {
+          setPageError(toErrorMessage(error));
+          return [] as Awaited<ReturnType<typeof inspectConversionDirectory>>;
+        }
+      })
+    );
+
+    const inspected = [...fileResults, ...directoryResults.flat()];
+    const failedInspect = inspected.filter((item) => item.kind === 'unsupported' && item.errorMessage);
+    const supportedItems = inspected.filter((item) => item.kind !== 'unsupported').map(toItem);
     setItems([...items, ...supportedItems.filter((item) => !items.some((current) => current.id === item.id))]);
+
+    if (failedInspect.length > 0 && supportedItems.length === 0) {
+      setPageError(failedInspect[0]?.errorMessage ?? '导入失败');
+    } else if (failedInspect.length > 0) {
+      setPageError(`${failedInspect.length} 个文件无法导入：${failedInspect[0]?.errorMessage ?? '未知错误'}`);
+    }
 
     if (!globalSettings.outputDirectory && sources.directories[0]) {
       updateGlobalSettings({ outputDirectory: sources.directories[0] });
@@ -169,12 +212,19 @@ export const useConversionWorkflow = () => {
 
   const failedItems = items.filter((item) => item.status === 'failed');
 
-  const runConversionItem = async (item: ConversionItem, batchSettings: ConversionBatchSettings) => {
+  const runConversionItem = async (
+    item: ConversionItem,
+    batchSettings: ConversionBatchSettings,
+    taskId: string
+  ) => {
     try {
       markItemRunning(item.id);
 
       if (item.kind === 'image') {
-        const paths = await convertImageFile(buildImageConversionRequest(item, batchSettings));
+        const paths = await convertImageFile({
+          ...buildImageConversionRequest(item, batchSettings),
+          taskId
+        });
         markItemSucceeded(item.id, paths);
       } else if (item.kind === 'document') {
         const paths = await renderDocumentToImages({
@@ -185,12 +235,14 @@ export const useConversionWorkflow = () => {
           quality: batchSettings.quality,
           pageNumbers: buildDocumentPagesForSettings(item, batchSettings),
           renderDensity: batchSettings.renderDensity,
-          namingPattern: batchSettings.namingPattern
+          namingPattern: batchSettings.namingPattern,
+          taskId
         });
         markItemSucceeded(item.id, paths);
       }
     } catch (error) {
-      markItemFailed(item.id, toErrorMessage(error));
+      // 结构化 CommandError 走 normalizeConversionError 的友好文案；取消与其它失败都落到列表项上。
+      markItemFailed(item.id, toErrorMessage(normalizeConversionError(error)));
     }
   };
 
@@ -237,11 +289,34 @@ export const useConversionWorkflow = () => {
       return;
     }
 
+    const control = createBatchQueueControl();
+    batchControlRef.current = control;
+    const taskId = createBatchTaskId('convert');
+    batchTaskIdRef.current = taskId;
     setIsRunning(true);
 
-    const settingsConcurrency = getSettingsStore().getState().maxConcurrency;
-    await runConcurrentQueue(readyItems, settingsConcurrency, (item) => runConversionItem(item, batchSettings));
-    setIsRunning(false);
+    try {
+      await registerBatchTask(taskId);
+      const settingsConcurrency = getSettingsStore().getState().maxConcurrency;
+      await runConcurrentQueue(
+        readyItems,
+        settingsConcurrency,
+        (item) => runConversionItem(item, batchSettings, taskId),
+        control
+      );
+    } finally {
+      batchControlRef.current = null;
+      batchTaskIdRef.current = null;
+      setIsRunning(false);
+    }
+  };
+
+  const cancelConversion = () => {
+    batchControlRef.current?.cancel();
+    const taskId = batchTaskIdRef.current;
+    if (taskId) {
+      void cancelBatchTask(taskId);
+    }
   };
 
   const canStart =
@@ -269,6 +344,7 @@ export const useConversionWorkflow = () => {
     retryFailedItems,
     clearList,
     openOutputDirectory,
-    startConversion
+    startConversion,
+    cancelConversion
   };
 };

@@ -211,6 +211,7 @@ fn extract_document_images_writes_output_files_from_image_sources() {
         quality: 90,
         naming_pattern: "source-name-index".into(),
         include_output_paths: Some(true),
+    task_id: None,
     })
     .unwrap();
 
@@ -240,6 +241,7 @@ fn extract_document_images_extracts_embedded_images_from_pdf() {
         quality: 90,
         naming_pattern: "source-name-index".into(),
         include_output_paths: Some(true),
+    task_id: None,
     })
     .unwrap();
 
@@ -278,6 +280,7 @@ fn inspect_and_extract_return_zero_for_pdf_without_embedded_images() {
         quality: 90,
         naming_pattern: "source-name-index".into(),
         include_output_paths: Some(true),
+    task_id: None,
     })
     .unwrap();
 
@@ -299,6 +302,7 @@ fn extract_document_images_extracts_docx_without_soffice() {
         quality: 90,
         naming_pattern: "source-name-index".into(),
         include_output_paths: Some(true),
+    task_id: None,
     })
     .unwrap();
 
@@ -329,6 +333,7 @@ fn extract_document_images_extracts_pptx_original_images_without_recoloring() {
         quality: 90,
         naming_pattern: "source-name-index".into(),
         include_output_paths: Some(true),
+    task_id: None,
     })
     .unwrap();
 
@@ -348,6 +353,10 @@ fn extract_document_images_skips_unsupported_pptx_media_files() {
     let source = dir.path().join("slides-with-wdp.pptx");
     write_pptx_with_png_and_unsupported_wdp(&source);
 
+    let inspected = run_inspect_extraction_document(source.to_string_lossy().into_owned()).unwrap();
+    // 预计数只统计可解码栅格，不包含 wdp 等专有格式。
+    assert_eq!(inspected.embedded_image_count, 1);
+
     let result = run_extract_document_images(ExtractDocumentImagesRequest {
         source_path: source.to_string_lossy().into_owned(),
         output_directory: dir.path().join("out").to_string_lossy().into_owned(),
@@ -356,6 +365,7 @@ fn extract_document_images_skips_unsupported_pptx_media_files() {
         quality: 90,
         naming_pattern: "source-name-index".into(),
         include_output_paths: Some(true),
+    task_id: None,
     })
     .unwrap();
 
@@ -363,6 +373,45 @@ fn extract_document_images_skips_unsupported_pptx_media_files() {
     assert_eq!(result.skipped_count, 1);
     assert_eq!(result.output_paths.len(), 1);
     assert!(PathBuf::from(&result.output_paths[0]).exists());
+}
+
+#[test]
+fn extract_document_images_counts_existing_pptx_outputs_as_completed() {
+    let dir = tempdir().unwrap();
+    let source = dir.path().join("slides.pptx");
+    write_minimal_pptx_with_embedded_image(&source);
+    let out_dir = dir.path().join("out");
+    fs::create_dir_all(&out_dir).unwrap();
+
+    let first = run_extract_document_images(ExtractDocumentImagesRequest {
+        source_path: source.to_string_lossy().into_owned(),
+        output_directory: out_dir.to_string_lossy().into_owned(),
+        output_format: "png".into(),
+        color_mode: "rgb".into(),
+        quality: 90,
+        naming_pattern: "source-name-index".into(),
+        include_output_paths: Some(true),
+    task_id: None,
+    })
+    .unwrap();
+    assert_eq!(first.extracted_count, 1);
+    assert!(PathBuf::from(&first.output_paths[0]).exists());
+
+    // 再次提取时目标已存在，仍应计入完成数，避免“目录有文件但界面完成数偏少”。
+    let second = run_extract_document_images(ExtractDocumentImagesRequest {
+        source_path: source.to_string_lossy().into_owned(),
+        output_directory: out_dir.to_string_lossy().into_owned(),
+        output_format: "png".into(),
+        color_mode: "rgb".into(),
+        quality: 90,
+        naming_pattern: "source-name-index".into(),
+        include_output_paths: Some(true),
+    task_id: None,
+    })
+    .unwrap();
+    assert_eq!(second.extracted_count, 1);
+    assert_eq!(second.skipped_count, 0);
+    assert_eq!(second.output_paths.len(), 1);
 }
 
 #[test]
@@ -392,6 +441,7 @@ fn extract_document_images_returns_zero_for_docx_without_images() {
         quality: 90,
         naming_pattern: "source-name-index".into(),
         include_output_paths: Some(true),
+    task_id: None,
     })
     .unwrap();
 

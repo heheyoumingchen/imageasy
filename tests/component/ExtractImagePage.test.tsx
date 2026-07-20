@@ -25,6 +25,14 @@ vi.mock('../../src/services/extractionCommands', () => ({
   extractDocumentImages: vi.fn()
 }));
 
+vi.mock('../../src/services/batchTaskCommands', () => ({
+  createBatchTaskId: vi.fn(() => 'extract-test-task'),
+  registerBatchTask: vi.fn(async () => undefined),
+  cancelBatchTask: vi.fn(async () => undefined),
+  completeBatchTask: vi.fn(async () => undefined),
+  isCancelledError: vi.fn(() => false)
+}));
+
 const { openExtractionSources, openExtractionDocuments, chooseOutputDirectory, openDirectoryInSystem } = await import('../../src/services/fileDialog');
 const { inspectExtractionDocument, inspectExtractionDirectory, extractDocumentImages } = await import('../../src/services/extractionCommands');
 
@@ -238,7 +246,8 @@ describe('ExtractImagePage', () => {
         colorMode: 'grayscale',
         quality: 90,
         namingPattern: 'source-name-date',
-        includeOutputPaths: false
+        includeOutputPaths: false,
+        taskId: 'extract-test-task'
       });
     });
 

@@ -14,7 +14,8 @@ const ExtractImagePage = () => {
     openOutputDirectory,
     toggleItemSelected,
     clearList,
-    startExtraction
+    startExtraction,
+    cancelExtraction
   } = useExtractionWorkflow();
   const language = useLanguage();
 
@@ -35,7 +36,7 @@ const ExtractImagePage = () => {
             actions: {
               clearList: 'Clear list',
               startExtraction: 'Start extraction',
-              running: 'Extracting...',
+              cancel: 'Cancel',
               openOutputDirectory: 'Open output directory',
               selectOutputDirectoryError: 'Please choose an output directory first',
             }
@@ -54,7 +55,7 @@ const ExtractImagePage = () => {
             actions: {
               clearList: '清空列表',
               startExtraction: '开始提取',
-              running: '正在提取...',
+              cancel: '取消',
               openOutputDirectory: '打开输出目录',
               selectOutputDirectoryError: '请先选择输出目录',
             }
@@ -92,17 +93,24 @@ const ExtractImagePage = () => {
         </div>
 
         <div className="flex items-center gap-3">
-          <button
-            type="button"
-            className="flex h-10 items-center gap-2 px-4 rounded-lg bg-meitu text-white text-[13px] font-bold transition-all hover:brightness-110 active:scale-95 disabled:opacity-50 disabled:active:scale-100"
-            onClick={() => startExtraction(copy.actions.selectOutputDirectoryError)}
-            disabled={isRunning || items.filter(i => i.status === 'ready' && i.selected).length === 0}
-          >
-            {isRunning && (
-              <div className="h-5 w-5 animate-spin rounded-full border-2 border-white border-t-transparent" />
-            )}
-            {isRunning ? copy.actions.running : copy.actions.startExtraction}
-          </button>
+          {isRunning ? (
+            <button
+              type="button"
+              className="flex h-10 items-center gap-2 px-4 rounded-lg border border-meitu bg-white text-meitu text-[13px] font-bold transition-all hover:bg-[#FFF5F6]"
+              onClick={cancelExtraction}
+            >
+              {copy.actions.cancel}
+            </button>
+          ) : (
+            <button
+              type="button"
+              className="flex h-10 items-center gap-2 px-4 rounded-lg bg-meitu text-white text-[13px] font-bold transition-all hover:brightness-110 active:scale-95 disabled:opacity-50 disabled:active:scale-100"
+              onClick={() => startExtraction(copy.actions.selectOutputDirectoryError)}
+              disabled={items.filter(i => i.status === 'ready' && i.selected).length === 0}
+            >
+              {copy.actions.startExtraction}
+            </button>
+          )}
           <button
             type="button"
             className="flex h-10 items-center gap-2 px-4 rounded-lg border border-border-light bg-white text-[#515867] text-[13px] font-bold transition-all hover:border-meitu hover:text-meitu disabled:opacity-50"

@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { extractDocumentImages, inspectExtractionDirectory, inspectExtractionDocument } from '../services/extractionCommands';
 import { openDirectoryInSystem, openExtractionDocuments, openExtractionSources } from '../services/fileDialog';
 import { useDragDropImport } from './useDragDropImport';
@@ -6,6 +6,11 @@ import { getSettingsStore } from './useSettingsStore';
 import { sourceDirectory, sourceName } from '../utils/paths';
 import { toErrorMessage } from '../utils/errors';
 import type { ExtractionDocumentInfo, ExtractionOutputFormat } from '../types/extraction';
+import {
+  cancelBatchTask,
+  createBatchTaskId,
+  registerBatchTask
+} from '../services/batchTaskCommands';
 
 export type ExtractionItem = ExtractionDocumentInfo & {
   status: 'ready' | 'running' | 'success' | 'failed';
@@ -81,6 +86,8 @@ export const useExtractionWorkflow = () => {
   const [pageError, setPageError] = useState<string | null>(null);
   const [isRunning, setIsRunning] = useState(false);
   const [failedDetailsOpen, setFailedDetailsOpen] = useState(false);
+  const cancelRequestedRef = useRef(false);
+  const batchTaskIdRef = useRef<string | null>(null);
 
   const stats = useMemo(() => {
     return {
@@ -164,31 +171,52 @@ export const useExtractionWorkflow = () => {
       return;
     }
 
+    cancelRequestedRef.current = false;
+    const taskId = createBatchTaskId('extract');
+    batchTaskIdRef.current = taskId;
     setPageError(null);
     setIsRunning(true);
 
     const readyItems = items.filter(i => i.status === 'ready' && i.selected);
 
-    for (const item of readyItems) {
-      setItems((current) => markExtractionItemRunning(current, item.sourcePath));
+    try {
+      await registerBatchTask(taskId);
+      for (const item of readyItems) {
+        if (cancelRequestedRef.current) {
+          break;
+        }
 
-      try {
-        const result = await extractDocumentImages({
-          sourcePath: item.sourcePath,
-          outputDirectory: targetDirectory,
-          outputFormat: exportSettings.outputFormat as ExtractionOutputFormat,
-          colorMode: exportSettings.colorMode,
-          quality: exportSettings.quality,
-          namingPattern: exportSettings.namingPattern,
-          includeOutputPaths: false
-        });
-        setItems((current) => markExtractionItemSucceeded(current, item.sourcePath, result.extractedCount));
-      } catch (error) {
-        setItems((current) => markExtractionItemFailed(current, item.sourcePath, toErrorMessage(error)));
+        setItems((current) => markExtractionItemRunning(current, item.sourcePath));
+
+        try {
+          const result = await extractDocumentImages({
+            sourcePath: item.sourcePath,
+            outputDirectory: targetDirectory,
+            outputFormat: exportSettings.outputFormat as ExtractionOutputFormat,
+            colorMode: exportSettings.colorMode,
+            quality: exportSettings.quality,
+            namingPattern: exportSettings.namingPattern,
+            includeOutputPaths: false,
+            taskId
+          });
+          setItems((current) => markExtractionItemSucceeded(current, item.sourcePath, result.extractedCount));
+        } catch (error) {
+          setItems((current) => markExtractionItemFailed(current, item.sourcePath, toErrorMessage(error)));
+        }
       }
+    } finally {
+      cancelRequestedRef.current = false;
+      batchTaskIdRef.current = null;
+      setIsRunning(false);
     }
+  };
 
-    setIsRunning(false);
+  const cancelExtraction = () => {
+    cancelRequestedRef.current = true;
+    const taskId = batchTaskIdRef.current;
+    if (taskId) {
+      void cancelBatchTask(taskId);
+    }
   };
 
   return {
@@ -205,6 +233,7 @@ export const useExtractionWorkflow = () => {
     retryFailed,
     toggleItemSelected,
     clearList,
-    startExtraction
+    startExtraction,
+    cancelExtraction
   };
 };

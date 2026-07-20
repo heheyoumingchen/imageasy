@@ -22,6 +22,14 @@ vi.mock('../../src/services/splittingCommands', () => ({
   splitImageFile: vi.fn()
 }));
 
+vi.mock('../../src/services/batchTaskCommands', () => ({
+  createBatchTaskId: vi.fn(() => 'split-test-task'),
+  registerBatchTask: vi.fn(async () => undefined),
+  cancelBatchTask: vi.fn(async () => undefined),
+  completeBatchTask: vi.fn(async () => undefined),
+  isCancelledError: vi.fn(() => false)
+}));
+
 const { openSplittingSources } = await import('../../src/services/fileDialog');
 const { inspectSplittingFile, inspectSplittingDirectory, splitImageFile } = await import('../../src/services/splittingCommands');
 
@@ -117,7 +125,8 @@ describe('SplitImagePage', () => {
       rows: 1,
       quality: 80,
       namingPattern: 'source-name-index',
-      includeOutputPaths: false
+      includeOutputPaths: false,
+      taskId: 'split-test-task'
     }));
     expect(await screen.findByText('完成 3 张')).toBeInTheDocument();
   });
@@ -144,7 +153,8 @@ describe('SplitImagePage', () => {
       rows: 4,
       quality: 100,
       namingPattern: 'source-name-index',
-      includeOutputPaths: false
+      includeOutputPaths: false,
+      taskId: 'split-test-task'
     }));
     expect(await screen.findByText('完成 4 张')).toBeInTheDocument();
   });
@@ -172,7 +182,8 @@ describe('SplitImagePage', () => {
       rows: 2,
       quality: 100,
       namingPattern: 'source-name-index',
-      includeOutputPaths: false
+      includeOutputPaths: false,
+      taskId: 'split-test-task'
     }));
     expect(await screen.findByText('完成 6 张')).toBeInTheDocument();
   });

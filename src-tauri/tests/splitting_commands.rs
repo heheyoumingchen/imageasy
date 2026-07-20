@@ -97,6 +97,7 @@ fn split_image_file_splits_grid_with_remainder_on_last_row_and_column() {
             quality: 88,
             naming_pattern: "source-name-index".into(),
             include_output_paths: Some(true),
+        task_id: None,
         },
         None,
     )
@@ -136,6 +137,7 @@ fn split_image_file_splits_vertical_rows_only() {
             quality: 75,
             naming_pattern: "source-name-index".into(),
             include_output_paths: Some(true),
+        task_id: None,
         },
         None,
     )
@@ -169,6 +171,7 @@ fn split_image_file_rejects_invalid_grid_and_tiny_image() {
             quality: 90,
             naming_pattern: "source-name-index".into(),
             include_output_paths: Some(true),
+        task_id: None,
         },
         None,
     )
@@ -186,6 +189,7 @@ fn split_image_file_rejects_invalid_grid_and_tiny_image() {
             quality: 90,
             naming_pattern: "source-name-index".into(),
             include_output_paths: Some(true),
+        task_id: None,
         },
         None,
     )
@@ -203,6 +207,7 @@ fn split_image_file_rejects_invalid_grid_and_tiny_image() {
             quality: 90,
             naming_pattern: "source-name-index".into(),
             include_output_paths: Some(true),
+        task_id: None,
         },
         None,
     )
@@ -232,6 +237,7 @@ fn split_image_file_skips_existing_outputs_with_continuous_names() {
             quality: 90,
             naming_pattern: "source-name-index".into(),
             include_output_paths: Some(true),
+        task_id: None,
         },
         None,
     )

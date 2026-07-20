@@ -10,12 +10,12 @@ const SplitImagePage = () => {
   const language = useLanguage();
   const copy = useMemo(() => language === 'en-US' ? {
     pageTitle: 'Image Splitting',
-    add: 'Import files', clear: 'Clear list', split: 'Split Image', splitting: 'Splitting...', openOutputDirectory: 'Open output directory', empty: 'Supports images and PDF files. Drag a folder here to open it.', pageUnit: 'pages', statusReady: 'Ready', statusRunning: 'Splitting', statusFailed: 'Failed', statusDone: (count: number) => `Done ${count}`,
+    add: 'Import files', clear: 'Clear list', split: 'Split Image', cancel: 'Cancel', openOutputDirectory: 'Open output directory', empty: 'Supports images and PDF files. Drag a folder here to open it.', pageUnit: 'pages', statusReady: 'Ready', statusRunning: 'Splitting', statusFailed: 'Failed', statusDone: (count: number) => `Done ${count}`,
     settings: { mode: 'Mode', modeHorizontal: 'Horizontal', modeVertical: 'Vertical', modeGrid: 'Grid', splitParameters: 'Split Parameters', horizontalSplits: 'Horizontal splits', verticalSplits: 'Vertical splits', previewParts: (count: number) => `This will create ${count} parts` },
     errors: { outputDirectoryRequired: 'Please choose an output directory first' }
   } : {
     pageTitle: '图片分割',
-    add: '添加文件', clear: '清空列表', split: '分割图片', splitting: '正在分割...', openOutputDirectory: '打开输出目录', empty: '支持图片和 PDF 文件，拖拽文件夹即可打开。', pageUnit: '页', statusReady: '待处理', statusRunning: '分割中', statusFailed: '失败', statusDone: (count: number) => `完成 ${count} 张`,
+    add: '添加文件', clear: '清空列表', split: '分割图片', cancel: '取消', openOutputDirectory: '打开输出目录', empty: '支持图片和 PDF 文件，拖拽文件夹即可打开。', pageUnit: '页', statusReady: '待处理', statusRunning: '分割中', statusFailed: '失败', statusDone: (count: number) => `完成 ${count} 张`,
     settings: { mode: '模式', modeHorizontal: '横向分割', modeVertical: '竖向分割', modeGrid: '网格分割', splitParameters: '分割参数', horizontalSplits: '横向分割份数', verticalSplits: '竖向分割份数', previewParts: (count: number) => `这将创建 ${count} 个部分` },
     errors: { outputDirectoryRequired: '请先选择输出目录' }
   }, [language]);
@@ -46,17 +46,24 @@ const SplitImagePage = () => {
           </button>
         </div>
         <div className="flex items-center gap-3">
-          <button
-            type="button"
-            className="flex h-10 items-center gap-2 px-4 rounded-lg bg-meitu text-white text-[13px] font-bold transition-all hover:brightness-110 active:scale-95 disabled:opacity-50 disabled:active:scale-100"
-            onClick={() => workflow.startSplitting(copy.errors)}
-            disabled={workflow.isRunning || !workflow.canStart}
-          >
-            {workflow.isRunning && (
-              <div className="h-5 w-5 animate-spin rounded-full border-2 border-white border-t-transparent" />
-            )}
-            {workflow.isRunning ? copy.splitting : copy.split}
-          </button>
+          {workflow.isRunning ? (
+            <button
+              type="button"
+              className="flex h-10 items-center gap-2 px-4 rounded-lg border border-meitu bg-white text-meitu text-[13px] font-bold transition-all hover:bg-[#FFF5F6]"
+              onClick={workflow.cancelSplitting}
+            >
+              {copy.cancel}
+            </button>
+          ) : (
+            <button
+              type="button"
+              className="flex h-10 items-center gap-2 px-4 rounded-lg bg-meitu text-white text-[13px] font-bold transition-all hover:brightness-110 active:scale-95 disabled:opacity-50 disabled:active:scale-100"
+              onClick={() => workflow.startSplitting(copy.errors)}
+              disabled={!workflow.canStart}
+            >
+              {copy.split}
+            </button>
+          )}
           <button
             type="button"
             className="flex h-10 items-center gap-2 px-4 rounded-lg border border-border-light bg-white text-[#515867] text-[13px] font-bold transition-all hover:border-meitu hover:text-meitu disabled:opacity-50"

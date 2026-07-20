@@ -1,12 +1,17 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { getSettingsStore } from './useSettingsStore';
 import { useDragDropImport } from './useDragDropImport';
 import { chooseOutputDirectory, openDirectoryInSystem, openSplittingSources } from '../services/fileDialog';
 import { inspectSplittingDirectory, inspectSplittingFile, splitImageFile } from '../services/splittingCommands';
-import { runConcurrentQueue } from '../utils/batchQueue';
+import { createBatchQueueControl, runConcurrentQueue, type BatchQueueControl } from '../utils/batchQueue';
 import { toErrorMessage } from '../utils/errors';
 import { sourceDirectory } from '../utils/paths';
 import type { InspectSplittingFileResult, SplittingItem, SplittingMode } from '../types/splitting';
+import {
+  cancelBatchTask,
+  createBatchTaskId,
+  registerBatchTask
+} from '../services/batchTaskCommands';
 
 const gridForMode = (mode: SplittingMode, horizontalSplits: number, verticalSplits: number) => {
   if (mode === 'horizontal') {
@@ -44,6 +49,8 @@ export const useSplittingWorkflow = () => {
   const [pageError, setPageError] = useState<string | null>(null);
   const [isRunning, setIsRunning] = useState(false);
   const [failedDetailsOpen, setFailedDetailsOpen] = useState(false);
+  const batchControlRef = useRef<BatchQueueControl | null>(null);
+  const batchTaskIdRef = useRef<string | null>(null);
 
   const stats = useMemo(() => ({
     total: items.length,
@@ -114,7 +121,7 @@ export const useSplittingWorkflow = () => {
     if (outputDirectory) await openDirectoryInSystem(outputDirectory);
   };
 
-  const runItem = async (item: SplittingItem, targetDirectory: string) => {
+  const runItem = async (item: SplittingItem, targetDirectory: string, taskId: string) => {
     setItems((current) => markItem(current, item.sourcePath, { status: 'running', errorMessage: null, outputPaths: [], splitCount: 0 }));
     try {
       const { columns, rows } = gridForMode(mode, horizontalSplits, verticalSplits);
@@ -128,7 +135,8 @@ export const useSplittingWorkflow = () => {
         rows,
         quality: exportSettings.quality,
         namingPattern: exportSettings.namingPattern,
-        includeOutputPaths: false
+        includeOutputPaths: false,
+        taskId
       });
       setItems((current) => markItem(current, item.sourcePath, { status: 'success', outputPaths: result.outputPaths, splitCount: result.splitCount, errorMessage: null }));
     } catch (error) {
@@ -149,10 +157,33 @@ export const useSplittingWorkflow = () => {
     }
     const readyItems = items.filter((item) => item.status === 'ready' && item.selected);
     if (readyItems.length === 0) return;
+    const control = createBatchQueueControl();
+    batchControlRef.current = control;
+    const taskId = createBatchTaskId('split');
+    batchTaskIdRef.current = taskId;
     setPageError(null);
     setIsRunning(true);
-    await runConcurrentQueue(readyItems, getSettingsStore().getState().maxConcurrency, (item) => runItem(item, targetDirectory));
-    setIsRunning(false);
+    try {
+      await registerBatchTask(taskId);
+      await runConcurrentQueue(
+        readyItems,
+        getSettingsStore().getState().maxConcurrency,
+        (item) => runItem(item, targetDirectory, taskId),
+        control
+      );
+    } finally {
+      batchControlRef.current = null;
+      batchTaskIdRef.current = null;
+      setIsRunning(false);
+    }
+  };
+
+  const cancelSplitting = () => {
+    batchControlRef.current?.cancel();
+    const taskId = batchTaskIdRef.current;
+    if (taskId) {
+      void cancelBatchTask(taskId);
+    }
   };
 
   return {
@@ -161,6 +192,6 @@ export const useSplittingWorkflow = () => {
     canStart: items.some((item) => item.status === 'ready' && item.selected) && Boolean(outputDirectory),
     importFiles, selectOutputDirectory, openOutputDirectory,
     updateMode, updateHorizontalSplits, updateVerticalSplits,
-    retryFailed, toggleItemSelected, clearList, startSplitting,
+    retryFailed, toggleItemSelected, clearList, startSplitting, cancelSplitting,
   };
 };

@@ -68,6 +68,8 @@ export type ConvertImageFileRequest = {
   quality?: number;
   // 仅当输出会替换源文件、且用户已通过批次覆盖确认时为 true。
   allowSourceOverwrite: boolean;
+  // 批次取消令牌 id。
+  taskId?: string;
 };
 
 export type RenderDocumentToImagesRequest = {
@@ -79,4 +81,6 @@ export type RenderDocumentToImagesRequest = {
   pageNumbers: number[];
   renderDensity: 'standard' | 'high';
   namingPattern: ConversionNamingPattern;
+  // 批次取消令牌 id。
+  taskId?: string;
 };

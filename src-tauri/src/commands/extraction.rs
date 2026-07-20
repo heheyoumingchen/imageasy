@@ -1,5 +1,10 @@
-use super::common::{
-    apply_color_mode, current_date_stamp, extension, normalized_format, write_dynamic_image,
+use super::{
+    cancellation::{self, TaskGuard},
+    common::{
+        apply_color_mode, current_date_stamp, extension, normalized_format, write_atomically,
+        write_dynamic_image,
+    },
+    path_guard::{ensure_output_directory, require_existing_file},
 };
 use anyhow::{Context, Result};
 use image::DynamicImage;
@@ -39,6 +44,9 @@ pub struct ExtractDocumentImagesRequest {
     pub naming_pattern: String,
     #[serde(default)]
     pub include_output_paths: Option<bool>,
+    /// 批次取消令牌 id；缺省表示不可取消。
+    #[serde(default)]
+    pub task_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -73,10 +81,10 @@ enum PdfImageOutput {
 #[tauri::command]
 pub async fn inspect_extraction_document(path: String) -> Result<ExtractionDocumentInfo, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        inspect_extraction_document_impl(&path).map_err(|error| error.to_string())
+        inspect_extraction_document_impl(&path).map_err(crate::commands::error_message::to_user_error_string)
     })
     .await
-    .map_err(|error| error.to_string())?
+    .map_err(crate::commands::error_message::to_user_error_string)?
 }
 
 #[tauri::command]
@@ -84,10 +92,10 @@ pub async fn inspect_extraction_directory(
     path: String,
 ) -> Result<Vec<ExtractionDocumentInfo>, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        inspect_extraction_directory_impl(&path).map_err(|error| error.to_string())
+        inspect_extraction_directory_impl(&path).map_err(crate::commands::error_message::to_user_error_string)
     })
     .await
-    .map_err(|error| error.to_string())?
+    .map_err(crate::commands::error_message::to_user_error_string)?
 }
 
 #[tauri::command]
@@ -95,10 +103,10 @@ pub async fn extract_document_images(
     request: ExtractDocumentImagesRequest,
 ) -> Result<ExtractDocumentImagesResult, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        extract_document_images_impl(request).map_err(|error| error.to_string())
+        extract_document_images_impl(request).map_err(crate::commands::error_message::to_user_error_string)
     })
     .await
-    .map_err(|error| error.to_string())?
+    .map_err(crate::commands::error_message::to_user_error_string)?
 }
 
 fn source_name(path: &Path, fallback: &str) -> String {
@@ -130,7 +138,7 @@ fn resolve_dictionary<'a>(
     }
 }
 
-fn resolve_stream<'a>(document: &'a LoDocument, object_id: ObjectId) -> Result<&'a LoStream> {
+fn resolve_stream(document: &LoDocument, object_id: ObjectId) -> Result<&LoStream> {
     document
         .get_object(object_id)
         .with_context(|| format!("无法读取 PDF 图片对象: {object_id:?}"))?
@@ -160,7 +168,7 @@ fn pdf_image_dimensions(stream: &LoStream) -> Result<(u32, u32)> {
     Ok((width, height))
 }
 
-fn pdf_image_color_space_name<'a>(stream: &'a LoStream) -> Option<&'a [u8]> {
+fn pdf_image_color_space_name(stream: &LoStream) -> Option<&[u8]> {
     match stream.dict.get(b"ColorSpace").ok() {
         Some(LoObject::Name(name)) => Some(name.as_slice()),
         Some(LoObject::Array(items)) if !items.is_empty() => items[0].as_name().ok(),
@@ -311,6 +319,28 @@ fn write_image_copy(
     write_dynamic_image(output_path, &image, output_format, Some(quality))
 }
 
+/// Office media 中当前解码链路可提取的栅格扩展名；矢量/专有格式（emf/wmf/svg/wdp 等）不计预计数。
+fn is_extractable_office_media(name: &str) -> bool {
+    matches!(
+        Path::new(name)
+            .extension()
+            .and_then(|value| value.to_str())
+            .unwrap_or_default()
+            .to_ascii_lowercase()
+            .as_str(),
+        "png" | "jpg" | "jpeg" | "gif" | "bmp" | "webp"
+    )
+}
+
+fn office_media_format(name: &str) -> String {
+    normalized_format(
+        Path::new(name)
+            .extension()
+            .and_then(|value| value.to_str())
+            .unwrap_or_default(),
+    )
+}
+
 fn extract_images_from_office_zip(
     path: &Path,
     media_prefix: &str,
@@ -336,16 +366,28 @@ fn extract_images_from_office_zip(
     Ok(images)
 }
 
-// 只统计 media 条目数量，不读取图片内容，供导入检查阶段快速预估。
+// 只统计可提取 media 条目数量，不读取图片内容，供导入检查阶段快速预估。
 fn count_images_in_office_zip(path: &Path, media_prefix: &str) -> Result<u32> {
     let file = fs::File::open(path)
         .with_context(|| format!("无法读取 Office 文档: {}", path.display()))?;
     let archive = ZipArchive::new(file).context("无法打开 Office 压缩包")?;
     let count = archive
         .file_names()
-        .filter(|name| name.starts_with(media_prefix) && !name.ends_with('/'))
+        .filter(|name| {
+            name.starts_with(media_prefix)
+                && !name.ends_with('/')
+                && is_extractable_office_media(name)
+        })
         .count();
     Ok(count as u32)
+}
+
+fn write_original_bytes(output_path: &Path, bytes: &[u8]) -> Result<()> {
+    write_atomically(output_path, |writer| {
+        std::io::Write::write_all(writer, bytes)
+            .with_context(|| format!("无法写入提取后的原始图片: {}", output_path.display()))?;
+        Ok(())
+    })
 }
 
 fn extract_images_from_docx(path: &Path) -> Result<Vec<(String, Vec<u8>)>> {
@@ -477,11 +519,14 @@ fn write_pdf_image_output(
 fn extract_document_images_impl(
     request: ExtractDocumentImagesRequest,
 ) -> Result<ExtractDocumentImagesResult> {
-    let source = PathBuf::from(&request.source_path);
+    let _guard = TaskGuard::new(request.task_id.clone());
+    let token = cancellation::token_for(request.task_id.as_deref());
+    cancellation::check_optional(token.as_ref())?;
+
+    let source = require_existing_file(Path::new(&request.source_path))?;
     let extension = extension(&source);
 
-    fs::create_dir_all(&request.output_directory)
-        .with_context(|| format!("无法创建输出目录: {}", request.output_directory))?;
+    let output_directory = ensure_output_directory(Path::new(&request.output_directory))?;
 
     let mut output_paths = Vec::new();
     let mut extracted_count = 0;
@@ -489,12 +534,14 @@ fn extract_document_images_impl(
     let include_output_paths = request.include_output_paths.unwrap_or(true);
 
     if matches!(extension.as_str(), "jpg" | "jpeg" | "png" | "webp" | "bmp") {
-        let output_path = Path::new(&request.output_directory).join(output_file_name(
+        cancellation::check_optional(token.as_ref())?;
+        let output_path = output_directory.join(output_file_name(
             &stem(&source),
             &request.naming_pattern,
             &request.output_format,
             1,
         ));
+        // 目标已存在时仍计入完成数，避免重复提取时“目录有文件、界面完成数偏少”。
         if !output_path.exists() {
             write_image_copy(
                 &source,
@@ -503,34 +550,34 @@ fn extract_document_images_impl(
                 &request.color_mode,
                 request.quality,
             )?;
-            record_written_output(
-                &mut output_paths,
-                &mut extracted_count,
-                &output_path,
-                include_output_paths,
-            );
         }
+        record_written_output(
+            &mut output_paths,
+            &mut extracted_count,
+            &output_path,
+            include_output_paths,
+        );
     } else if extension.as_str() == "pdf" {
         let (document, _info, images) = inspect_pdf_document(&source)?;
         for entry in images {
-            let output_path = Path::new(&request.output_directory).join(output_file_name(
+            cancellation::check_optional(token.as_ref())?;
+            let output_path = output_directory.join(output_file_name(
                 &stem(&source),
                 &request.naming_pattern,
                 &request.output_format,
                 entry.index,
             ));
-            if output_path.exists() {
-                continue;
+            if !output_path.exists() {
+                let pdf_output = extract_pdf_image_output(&document, &entry)
+                    .with_context(|| format!("无法提取 PDF 内嵌图片 #{}", entry.index))?;
+                write_pdf_image_output(
+                    &output_path,
+                    pdf_output,
+                    &request.output_format,
+                    &request.color_mode,
+                    request.quality,
+                )?;
             }
-            let pdf_output = extract_pdf_image_output(&document, &entry)
-                .with_context(|| format!("无法提取 PDF 内嵌图片 #{}", entry.index))?;
-            write_pdf_image_output(
-                &output_path,
-                pdf_output,
-                &request.output_format,
-                &request.color_mode,
-                request.quality,
-            )?;
             record_written_output(
                 &mut output_paths,
                 &mut extracted_count,
@@ -544,33 +591,67 @@ fn extract_document_images_impl(
         } else {
             extract_images_from_docx(&source)?
         };
-        for (index, (_name, bytes)) in images.into_iter().enumerate() {
-            let Ok(image) = image::load_from_memory(&bytes) else {
+        // 输出序号只给成功落盘/已存在的可提取媒体递增。
+        let mut extractable_index = 0u32;
+        for (name, bytes) in images {
+            cancellation::check_optional(token.as_ref())?;
+            if !is_extractable_office_media(&name) {
                 skipped_count += 1;
                 continue;
-            };
-            let image = apply_color_mode(image, &request.color_mode);
-            let output_path = Path::new(&request.output_directory).join(output_file_name(
+            }
+            let next_index = extractable_index + 1;
+            let media_format = office_media_format(&name);
+            let output_path = output_directory.join(output_file_name(
                 &stem(&source),
                 &request.naming_pattern,
                 &request.output_format,
-                index as u32 + 1,
+                next_index,
             ));
             if output_path.exists() {
+                extractable_index = next_index;
+                record_written_output(
+                    &mut output_paths,
+                    &mut extracted_count,
+                    &output_path,
+                    include_output_paths,
+                );
                 continue;
             }
-            write_dynamic_image(
-                &output_path,
-                &image,
-                &request.output_format,
-                Some(request.quality),
-            )?;
-            record_written_output(
-                &mut output_paths,
-                &mut extracted_count,
-                &output_path,
-                include_output_paths,
-            );
+
+            let wrote = if request.color_mode == "rgb"
+                && media_format == normalized_format(&request.output_format)
+            {
+                // RGB 且格式一致时直写原始字节，避免无意义的解码再编码。
+                write_original_bytes(&output_path, &bytes)?;
+                true
+            } else {
+                match image::load_from_memory(&bytes) {
+                    Ok(image) => {
+                        let image = apply_color_mode(image, &request.color_mode);
+                        write_dynamic_image(
+                            &output_path,
+                            &image,
+                            &request.output_format,
+                            Some(request.quality),
+                        )?;
+                        true
+                    }
+                    Err(_) => {
+                        skipped_count += 1;
+                        false
+                    }
+                }
+            };
+
+            if wrote {
+                extractable_index = next_index;
+                record_written_output(
+                    &mut output_paths,
+                    &mut extracted_count,
+                    &output_path,
+                    include_output_paths,
+                );
+            }
         }
     } else {
         anyhow::bail!("不支持的文档类型: {extension}");
