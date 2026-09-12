@@ -526,6 +526,106 @@ describe('ConvertImagePage', () => {
     });
   });
 
+  it('writes each imported folder image back to its own source folder under same-as-source', async () => {
+    const user = userEvent.setup();
+    vi.mocked(openConversionSources).mockResolvedValue({
+      files: [],
+      directories: ['F:/album-a', 'F:/album-b'],
+      cancelled: false
+    });
+    vi.mocked(inspectConversionDirectory).mockImplementation(async (path: string) => {
+      if (path === 'F:/album-a') {
+        return [
+          {
+            kind: 'image' as const,
+            sourcePath: 'F:/album-a/a.jpg',
+            sourceName: 'a.jpg',
+            imageMetadata: { width: 800, height: 600, extension: 'jpg' },
+            documentMetadata: null,
+            errorMessage: null
+          }
+        ];
+      }
+      return [
+        {
+          kind: 'image' as const,
+          sourcePath: 'F:/album-b/nested/b.jpg',
+          sourceName: 'b.jpg',
+          imageMetadata: { width: 640, height: 480, extension: 'jpg' },
+          documentMetadata: null,
+          errorMessage: null
+        }
+      ];
+    });
+    vi.mocked(convertImageFile)
+      .mockResolvedValueOnce(['F:/album-a/a-001.jpg'])
+      .mockResolvedValueOnce(['F:/album-b/nested/b-001.jpg']);
+
+    render(<ConvertImagePage />);
+    await user.click(screen.getByRole('button', { name: '添加文件' }));
+    await screen.findByText('a.jpg');
+    await screen.findByText('b.jpg');
+    await user.click(screen.getByRole('button', { name: '开始转换' }));
+
+    await waitFor(() => {
+      expect(convertImageFile).toHaveBeenCalledTimes(2);
+    });
+    expect(convertImageFile).toHaveBeenCalledWith(
+      expect.objectContaining({ sourcePath: 'F:/album-a/a.jpg', outputPath: 'F:/album-a/a-001.jpg' })
+    );
+    expect(convertImageFile).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sourcePath: 'F:/album-b/nested/b.jpg',
+        outputPath: 'F:/album-b/nested/b-001.jpg'
+      })
+    );
+  });
+
+  it('keeps each document in its own source folder under same-as-source', async () => {
+    const user = userEvent.setup();
+    vi.mocked(openConversionSources).mockResolvedValue({
+      files: ['F:/docs-a/a.pdf', 'F:/docs-b/b.pdf'],
+      directories: [],
+      cancelled: false
+    });
+    vi.mocked(inspectConversionFile)
+      .mockResolvedValueOnce({
+        kind: 'document',
+        sourcePath: 'F:/docs-a/a.pdf',
+        sourceName: 'a.pdf',
+        imageMetadata: null,
+        documentMetadata: { pageCount: 1, extension: 'pdf' },
+        errorMessage: null
+      })
+      .mockResolvedValueOnce({
+        kind: 'document',
+        sourcePath: 'F:/docs-b/b.pdf',
+        sourceName: 'b.pdf',
+        imageMetadata: null,
+        documentMetadata: { pageCount: 1, extension: 'pdf' },
+        errorMessage: null
+      });
+    vi.mocked(renderDocumentToImages)
+      .mockResolvedValueOnce(['F:/docs-a/a-001.jpg'])
+      .mockResolvedValueOnce(['F:/docs-b/b-001.jpg']);
+
+    render(<ConvertImagePage />);
+    await user.click(screen.getByRole('button', { name: '添加文件' }));
+    await screen.findByText('a.pdf');
+    await screen.findByText('b.pdf');
+    await user.click(screen.getByRole('button', { name: '开始转换' }));
+
+    await waitFor(() => {
+      expect(renderDocumentToImages).toHaveBeenCalledTimes(2);
+    });
+    expect(renderDocumentToImages).toHaveBeenCalledWith(
+      expect.objectContaining({ sourcePath: 'F:/docs-a/a.pdf', outputDirectory: 'F:/docs-a' })
+    );
+    expect(renderDocumentToImages).toHaveBeenCalledWith(
+      expect.objectContaining({ sourcePath: 'F:/docs-b/b.pdf', outputDirectory: 'F:/docs-b' })
+    );
+  });
+
   it('authorizes source overwrite only after the batch confirmation is accepted', async () => {
     const user = userEvent.setup();
     setConversionSettings({ outputFormat: 'jpg', namingPattern: 'source-name-original' });

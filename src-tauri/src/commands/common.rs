@@ -1,3 +1,4 @@
+use super::cmyk::write_cmyk_jpeg;
 use anyhow::{Context, Result};
 use image::{
     codecs::jpeg::JpegEncoder, codecs::png::PngEncoder, codecs::webp::WebPEncoder, ColorType,
@@ -31,7 +32,7 @@ pub fn apply_color_mode(image: DynamicImage, color_mode: &str) -> DynamicImage {
     match color_mode {
         // 兼容旧配置里的 gray-cmyk；两者都输出真正的单通道灰度。
         "grayscale" | "gray-cmyk" => DynamicImage::ImageLuma8(image.into_luma8()),
-        // 已经是 RGB8 时避免重复转换拷贝。
+        // CMYK 在 write_dynamic_image 里编码为 4 通道 JPEG；这里保持 RGB 作为输入。
         _ => match image {
             DynamicImage::ImageRgb8(_) => image,
             other => DynamicImage::ImageRgb8(other.into_rgb8()),
@@ -170,7 +171,26 @@ pub fn write_dynamic_image(
     image: &DynamicImage,
     output_format: &str,
     quality: Option<u8>,
+    color_mode: &str,
 ) -> Result<()> {
+    if color_mode == "cmyk" {
+        if normalized_format(output_format) != "jpg" {
+            anyhow::bail!("CMYK 仅支持 JPG 输出，请将导出格式改为 JPG");
+        }
+        return write_atomically(output_path, |file| {
+            let mut writer = BufWriter::new(file);
+            match image {
+                DynamicImage::ImageRgb8(rgb) => write_cmyk_jpeg(&mut writer, rgb, quality)?,
+                other => {
+                    let rgb = other.to_rgb8();
+                    write_cmyk_jpeg(&mut writer, &rgb, quality)?;
+                }
+            }
+            writer.flush()?;
+            Ok(())
+        });
+    }
+
     // 原子写：编码到父目录内的临时文件，成功后再替换目标，避免编码失败留下截断文件。
     write_atomically(output_path, |file| {
         let mut writer = BufWriter::new(file);
@@ -215,6 +235,14 @@ mod tests {
         let source =
             DynamicImage::ImageRgb8(ImageBuffer::<Rgb<u8>, _>::from_pixel(2, 2, Rgb([1, 2, 3])));
         let output = apply_color_mode(source, "rgb");
+        assert!(matches!(output, DynamicImage::ImageRgb8(_)));
+    }
+
+    #[test]
+    fn cmyk_color_mode_keeps_rgb_working_image() {
+        let source =
+            DynamicImage::ImageRgb8(ImageBuffer::<Rgb<u8>, _>::from_pixel(2, 2, Rgb([1, 2, 3])));
+        let output = apply_color_mode(source, "cmyk");
         assert!(matches!(output, DynamicImage::ImageRgb8(_)));
     }
 
@@ -293,5 +321,33 @@ mod tests {
         let result = write_webp_rgb(&mut writer, &rgb, 0, 1, Some(80));
 
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn cmyk_jpeg_write_is_decoded_as_cmyk32() {
+        let dir = tempdir().unwrap();
+        let target = dir.path().join("cmyk.jpg");
+        let rgb = DynamicImage::ImageRgb8(ImageBuffer::<Rgb<u8>, _>::from_pixel(8, 6, Rgb([200, 20, 30])));
+
+        write_dynamic_image(&target, &rgb, "jpg", Some(90), "cmyk").unwrap();
+
+        let file = fs::File::open(&target).unwrap();
+        let mut decoder = jpeg_decoder::Decoder::new(std::io::BufReader::new(file));
+        decoder.read_info().unwrap();
+        assert_eq!(
+            decoder.info().unwrap().pixel_format,
+            jpeg_decoder::PixelFormat::CMYK32
+        );
+    }
+
+    #[test]
+    fn cmyk_png_is_rejected() {
+        let dir = tempdir().unwrap();
+        let target = dir.path().join("cmyk.png");
+        let rgb = DynamicImage::ImageRgb8(ImageBuffer::<Rgb<u8>, _>::from_pixel(2, 2, Rgb([1, 2, 3])));
+
+        let error = write_dynamic_image(&target, &rgb, "png", Some(90), "cmyk").unwrap_err();
+        assert!(error.to_string().contains("CMYK 仅支持 JPG"));
+        assert!(!target.exists());
     }
 }

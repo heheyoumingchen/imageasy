@@ -323,6 +323,89 @@ fn convert_image_file_writes_single_channel_grayscale_png() {
 }
 
 #[test]
+fn convert_image_file_writes_cmyk_jpeg() {
+    let dir = tempdir().unwrap();
+    let source = dir.path().join("source.png");
+    let target = dir.path().join("out.jpg");
+
+    ImageBuffer::<Rgb<u8>, _>::from_pixel(6, 4, Rgb([200, 20, 30]))
+        .save(&source)
+        .unwrap();
+
+    let output_paths = run_convert_image_file(ConvertImageFileRequest {
+        source_path: source.to_string_lossy().into_owned(),
+        output_path: target.to_string_lossy().into_owned(),
+        output_format: "jpg".into(),
+        color_mode: "cmyk".into(),
+        quality: Some(90),
+        allow_source_overwrite: false,
+        task_id: None,
+    })
+    .unwrap();
+
+    let bytes = fs::read(&output_paths[0]).unwrap();
+    assert_eq!(&bytes[..2], [0xFF, 0xD8]);
+    assert!(
+        bytes.windows(5).any(|window| window == b"Adobe"),
+        "CMYK JPEG must include Adobe APP14"
+    );
+    assert!(
+        bytes.windows(12).any(|window| window == b"ICC_PROFILE\0"),
+        "CMYK JPEG must embed the SWOP ICC profile"
+    );
+    assert_eq!(jpeg_sof_component_count(&bytes), Some(4));
+}
+
+fn jpeg_sof_component_count(bytes: &[u8]) -> Option<u8> {
+    let mut index = 0;
+    while index + 1 < bytes.len() {
+        if bytes[index] != 0xFF {
+            index += 1;
+            continue;
+        }
+        let marker = bytes[index + 1];
+        if marker == 0xD8 || marker == 0xD9 || (0xD0..=0xD7).contains(&marker) {
+            index += 2;
+            continue;
+        }
+        if index + 3 >= bytes.len() {
+            return None;
+        }
+        let length = u16::from_be_bytes([bytes[index + 2], bytes[index + 3]]) as usize;
+        if matches!(marker, 0xC0 | 0xC1 | 0xC2) {
+            return bytes.get(index + 9).copied();
+        }
+        index = index.saturating_add(2).saturating_add(length);
+    }
+    None
+}
+
+#[test]
+fn convert_image_file_rejects_cmyk_png() {
+    let dir = tempdir().unwrap();
+    let source = dir.path().join("source.png");
+    let target = dir.path().join("out.png");
+
+    ImageBuffer::<Rgb<u8>, _>::from_pixel(2, 2, Rgb([10, 20, 30]))
+        .save(&source)
+        .unwrap();
+
+    let error = run_convert_image_file(ConvertImageFileRequest {
+        source_path: source.to_string_lossy().into_owned(),
+        output_path: target.to_string_lossy().into_owned(),
+        output_format: "png".into(),
+        color_mode: "cmyk".into(),
+        quality: Some(90),
+        allow_source_overwrite: false,
+        task_id: None,
+    })
+    .unwrap_err();
+
+    assert!(error.contains("CMYK 仅支持 JPG"));
+    assert!(!target.exists());
+}
+
+#[test]
 fn convert_image_file_writes_single_channel_grayscale_webp() {
     let dir = tempdir().unwrap();
     let source = dir.path().join("source.png");

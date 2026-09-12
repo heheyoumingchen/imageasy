@@ -10,7 +10,7 @@ import { openConversionSources, openConversionFiles, chooseOutputDirectory, open
 import { getSettingsStore } from './useSettingsStore';
 import { useConversionStore } from '../stores/conversionStore';
 import type { ConversionItem, ConversionOutputFormat, ConversionColorMode, ConversionNamingPattern, ConversionOutputSettings, InspectConversionFileResult } from '../types/conversion';
-import { buildImageOutputName, joinOutputPath, willOverwriteSource } from '../utils/conversionOutputPaths';
+import { buildImageOutputName, joinOutputPath, resolveItemOutputDirectory, willOverwriteSource, type ImageOutputPathSettings } from '../utils/conversionOutputPaths';
 import { expandPageRange } from '../utils/pageRange';
 import { sourceDirectory } from '../utils/paths';
 import { normalizeConversionError, toErrorMessage } from '../utils/errors';
@@ -20,6 +20,7 @@ import {
   createBatchTaskId,
   registerBatchTask
 } from '../services/batchTaskCommands';
+import type { OutputDirectoryStrategy } from '../stores/settingsStore';
 
 // 转换专属参数（来自 conversionStore）与公共导出设置（来自 exportSettings）合并后的批次快照。
 type ConversionBatchSettings = ConversionOutputSettings & {
@@ -29,6 +30,8 @@ type ConversionBatchSettings = ConversionOutputSettings & {
   quality: number;
   // 同一批次共享一个日期戳，避免逐张生成时刻不同导致文件名不一致。
   dateStamp: string;
+  // 输出目录策略：same-as-source 时每项写入各自源文件所在目录；custom 时统一写入默认目录。
+  outputDirectoryStrategy: OutputDirectoryStrategy;
 };
 
 const toItem = (result: InspectConversionFileResult): ConversionItem => ({
@@ -46,17 +49,38 @@ const toItem = (result: InspectConversionFileResult): ConversionItem => ({
   outputPaths: []
 });
 
+// 每项输出的目录：same-as-source 时回到各自源文件所在目录（多源目录导入不再合并），
+// custom 时统一到设置页保存的默认目录。两种策略都用同一份路径写入后端。
+const resolveOutputDirectory = (item: ConversionItem, settings: ConversionBatchSettings) =>
+  resolveItemOutputDirectory(item.sourcePath, settings.outputDirectoryStrategy, settings.outputDirectory);
+
+type ImageOutputPathSettingsForOverwrite = Pick<ImageOutputPathSettings, 'outputDirectory' | 'outputFormat' | 'namingPattern' | 'dateStamp'>;
+
+// willOverwriteSource 需按每项目录判定，因此这里用同样的目录解析逻辑而不是共用 settings.outputDirectory。
+const itemWillOverwriteSource = (
+  item: ConversionItem,
+  settings: ConversionBatchSettings
+) => {
+  const overwriteSettings: ImageOutputPathSettingsForOverwrite = {
+    outputDirectory: resolveOutputDirectory(item, settings),
+    outputFormat: settings.outputFormat,
+    namingPattern: settings.namingPattern,
+    dateStamp: settings.dateStamp
+  };
+  return willOverwriteSource(item, overwriteSettings);
+};
+
 const buildImageConversionRequest = (item: ConversionItem, settings: ConversionBatchSettings) => {
   const outputName = buildImageOutputName(item, settings);
 
   return {
     sourcePath: item.sourcePath,
-    outputPath: joinOutputPath(settings.outputDirectory, outputName),
+    outputPath: joinOutputPath(resolveOutputDirectory(item, settings), outputName),
     outputFormat: settings.outputFormat,
     colorMode: settings.colorMode,
     quality: settings.quality,
     // 仅当该项输出会替换源文件时授权覆盖；此时批次开始前已弹出统一确认。
-    allowSourceOverwrite: willOverwriteSource(item, settings)
+    allowSourceOverwrite: itemWillOverwriteSource(item, settings)
   };
 };
 
@@ -229,7 +253,7 @@ export const useConversionWorkflow = () => {
       } else if (item.kind === 'document') {
         const paths = await renderDocumentToImages({
           sourcePath: item.sourcePath,
-          outputDirectory: batchSettings.outputDirectory,
+          outputDirectory: resolveOutputDirectory(item, batchSettings),
           outputFormat: batchSettings.outputFormat,
           colorMode: batchSettings.colorMode,
           quality: batchSettings.quality,
@@ -258,19 +282,27 @@ export const useConversionWorkflow = () => {
       return;
     }
 
-    // same-as-source 策略沿用从源推断的 outputDirectory；custom 策略使用设置页保存的固定默认目录。
-    let outputDirectory = globalSettings.outputDirectory;
     const settingsState = getSettingsStore().getState();
-    if (settingsState.outputDirectoryStrategy === 'custom') {
-      outputDirectory = settingsState.defaultOutputDirectory;
-    }
-    if (!outputDirectory.trim()) {
+    const outputDirectoryStrategy = settingsState.outputDirectoryStrategy;
+    // custom 策略使用设置页保存的固定默认目录；same-as-source 时每项各自落到源文件所在目录，
+    // 这里的 outputDirectory 只作为 custom 路径与「打开输出目录」的回退值。
+    const outputDirectory =
+      outputDirectoryStrategy === 'custom'
+        ? settingsState.defaultOutputDirectory
+        : globalSettings.outputDirectory;
+    if (outputDirectoryStrategy === 'custom' && !outputDirectory.trim()) {
       return;
     }
 
     const exportSettings = settingsState.exportSettings;
     const dateStamp = new Date().toISOString().slice(0, 10).replace(/-/g, '');
-    const batchSettings: ConversionBatchSettings = { ...globalSettings, ...exportSettings, outputDirectory, dateStamp };
+    const batchSettings: ConversionBatchSettings = {
+      ...globalSettings,
+      ...exportSettings,
+      outputDirectory,
+      dateStamp,
+      outputDirectoryStrategy
+    };
 
     for (const item of readyItems.filter((entry) => entry.kind === 'document')) {
       try {
@@ -284,7 +316,7 @@ export const useConversionWorkflow = () => {
     // 原文件名 + 源文件同目录时，输出会替换原始图片；批量开始前统一确认一次。
     const replacingSource = readyItems
       .filter((item) => item.kind === 'image')
-      .some((item) => willOverwriteSource(item, batchSettings));
+      .some((item) => itemWillOverwriteSource(item, batchSettings));
     if (replacingSource && !window.confirm('当前设置会替换源文件同目录下的原始图片。是否继续？')) {
       return;
     }

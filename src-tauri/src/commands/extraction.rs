@@ -316,7 +316,7 @@ fn write_image_copy(
     let image =
         image::open(source).with_context(|| format!("无法读取嵌入图片: {}", source.display()))?;
     let image = apply_color_mode(image, color_mode);
-    write_dynamic_image(output_path, &image, output_format, Some(quality))
+    write_dynamic_image(output_path, &image, output_format, Some(quality), color_mode)
 }
 
 /// Office media 中当前解码链路可提取的栅格扩展名；矢量/专有格式（emf/wmf/svg/wdp 等）不计预计数。
@@ -507,11 +507,11 @@ fn write_pdf_image_output(
         PdfImageOutput::OriginalBytes { bytes, .. } => {
             let image = image::load_from_memory(&bytes).context("无法读取原始 PDF 图片流")?;
             let image = apply_color_mode(image, color_mode);
-            write_dynamic_image(output_path, &image, requested_format, Some(quality))
+            write_dynamic_image(output_path, &image, requested_format, Some(quality), color_mode)
         }
         PdfImageOutput::DecodedImage(image) => {
             let image = apply_color_mode(image, color_mode);
-            write_dynamic_image(output_path, &image, requested_format, Some(quality))
+            write_dynamic_image(output_path, &image, requested_format, Some(quality), color_mode)
         }
     }
 }
@@ -633,6 +633,7 @@ fn extract_document_images_impl(
                             &image,
                             &request.output_format,
                             Some(request.quality),
+                            &request.color_mode,
                         )?;
                         true
                     }

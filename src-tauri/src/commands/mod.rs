@@ -1,4 +1,5 @@
 pub mod cancellation;
+mod cmyk;
 pub mod common;
 pub mod conversion;
 pub mod editor;

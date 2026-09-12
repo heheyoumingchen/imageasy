@@ -650,6 +650,7 @@ fn stitch_image_files_impl(request: StitchImageFilesRequest) -> Result<StitchIma
         &canvas,
         &request.output_format,
         Some(request.quality),
+        &request.color_mode,
     )?;
 
     Ok(StitchImageFilesResult {

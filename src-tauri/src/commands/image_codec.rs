@@ -286,10 +286,17 @@ pub(crate) fn estimate_conversion_memory(
         SourcePixelFormat::Cmyk8 => 4,
     };
     let wants_luma = matches!(color_mode, "grayscale" | "gray-cmyk");
+    let wants_cmyk = color_mode == "cmyk";
     let decoded = checked_mul_u64(pixels, source_channels)?;
 
-    // 色彩转换后的工作缓冲区。
-    let working_channels: u64 = if wants_luma { 1 } else { 3 };
+    // 色彩转换后的工作缓冲区。CMYK JPEG 另有 4 通道油墨缓冲。
+    let working_channels: u64 = if wants_luma {
+        1
+    } else if wants_cmyk {
+        4
+    } else {
+        3
+    };
     let working = checked_mul_u64(pixels, working_channels)?;
 
     // 源与工作缓冲可能同时存在（CMYK→RGB、RGB→Luma）。
@@ -303,8 +310,9 @@ pub(crate) fn estimate_conversion_memory(
         other => other,
     };
 
-    // 编码侧额外缓冲。
+    // 编码侧额外缓冲。CMYK 路径同时保留 RGB 工作图与 4 通道油墨缓冲。
     let encode_extra = match format {
+        "jpg" if wants_cmyk => checked_add_u64(checked_mul_u64(pixels, 3)?, working)?,
         "jpg" => {
             // JPEG 编码器输出缓冲约等于工作图。
             working
@@ -414,6 +422,9 @@ mod tests {
 
         let plan =
             plan_image_conversion(&source, &dest, "jpg", "grayscale", Some(100), true).unwrap();
+        assert_eq!(plan.operation, ImageConversionOperation::Transcode);
+
+        let plan = plan_image_conversion(&source, &dest, "jpg", "cmyk", Some(100), true).unwrap();
         assert_eq!(plan.operation, ImageConversionOperation::Transcode);
 
         let plan = plan_image_conversion(&source, &source, "jpg", "rgb", Some(100), true).unwrap();

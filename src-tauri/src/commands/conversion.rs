@@ -712,6 +712,7 @@ fn execute_conversion_job(job: ConversionJob) -> Result<Vec<String>> {
                 &output,
                 &requested_output_format,
                 request.quality,
+                &request.color_mode,
             )?;
         }
     }
@@ -1084,6 +1085,7 @@ pub mod benchmarking {
                     &output,
                     &requested_output_format,
                     request.quality,
+                    &request.color_mode,
                 )?;
                 let encode_us = encode.elapsed().as_micros() as u64;
                 let finalize = Instant::now();
@@ -1302,6 +1304,7 @@ impl<'a> DocumentOutputTransaction<'a> {
             &image,
             &self.request.output_format,
             Some(self.request.quality),
+            &self.request.color_mode,
         )?;
         self.created_paths.push(plan.output_path.clone());
         self.output_paths

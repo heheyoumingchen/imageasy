@@ -305,6 +305,7 @@ fn write_split_outputs(
             &split,
             &request.output_format,
             Some(request.quality),
+            &request.color_mode,
         )?;
         *written_count += 1;
         if include_output_paths {

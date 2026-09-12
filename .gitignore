@@ -7,10 +7,17 @@ src-tauri/target/
 src-tauri/settings.json
 src-tauri/pdfium/
 src-tauri/binaries/
+.env
+.env.*
 
 # 构建产物 / 大文件
 green-package/
 设计稿/pdfium_x86-64.zip
+设计稿/meitu/
+
+# 本地文档（不入库）
+技术栈.txt
+桌面软件上线审核（超全）.html
 
 # 转换基准素材与报告（可复现，不入库）
 src-tauri/target/conversion-bench-fixtures/

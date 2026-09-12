@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildImageOutputName, joinOutputPath, willOverwriteSource } from '../../src/utils/conversionOutputPaths';
+import { buildImageOutputName, joinOutputPath, resolveItemOutputDirectory, willOverwriteSource } from '../../src/utils/conversionOutputPaths';
 
 const item = { sourcePath: 'F:/demo/photo.jpg', sourceStem: 'photo' };
 
@@ -57,5 +57,15 @@ describe('conversion output paths', () => {
 
   it('joins output paths without duplicate trailing separators', () => {
     expect(joinOutputPath('F:/out/', 'photo.jpg')).toBe('F:/out/photo.jpg');
+  });
+
+  it('keeps each source file in its own folder under same-as-source', () => {
+    expect(resolveItemOutputDirectory('F:/album-a/photo.jpg', 'same-as-source', 'F:/fallback')).toBe('F:/album-a');
+    expect(resolveItemOutputDirectory('F:/album-b/nested/photo.jpg', 'same-as-source', 'F:/fallback')).toBe('F:/album-b/nested');
+  });
+
+  it('uses the custom directory for every item under custom strategy', () => {
+    expect(resolveItemOutputDirectory('F:/album-a/photo.jpg', 'custom', 'F:/picked')).toBe('F:/picked');
+    expect(resolveItemOutputDirectory('F:/album-b/photo.jpg', 'custom', 'F:/picked')).toBe('F:/picked');
   });
 });

@@ -1,4 +1,5 @@
 import type { ConversionItem, ConversionNamingPattern, ConversionOutputFormat } from '../types/conversion';
+import { sourceDirectory } from './paths';
 
 export type ImageOutputPathSettings = {
   outputDirectory: string;
@@ -24,6 +25,13 @@ export const buildImageOutputName = (item: Pick<ConversionItem, 'sourceStem'>, s
 };
 
 export const joinOutputPath = (directory: string, fileName: string) => `${normalizeDirectory(directory)}/${fileName}`;
+
+// same-as-source：每张图回到自己的源目录；custom：统一写到设置页的默认目录。
+export const resolveItemOutputDirectory = (
+  sourcePath: string,
+  strategy: 'same-as-source' | 'custom',
+  customDirectory: string
+) => (strategy === 'custom' ? customDirectory : sourceDirectory(sourcePath));
 
 // Windows 路径大小写不敏感且分隔符混用，统一后再比较是否指向同一文件。
 export const pathsReferToSameFile = (left: string, right: string) => {

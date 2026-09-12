@@ -1,6 +1,5 @@
-import type { MouseEvent } from 'react';
 import { Minus, Square, X } from 'lucide-react';
-import { closeWindow, minimizeWindow, startWindowDrag, toggleMaximizeWindow } from '../../services/windowCommands';
+import { closeWindow, minimizeWindow, toggleMaximizeWindow } from '../../services/windowCommands';
 
 const TopBar = () => {
   const handleMinimize = () => {
@@ -15,20 +14,11 @@ const TopBar = () => {
     void closeWindow();
   };
 
-  const handleStartDragging = (event: MouseEvent<HTMLDivElement>) => {
-    if ((event.target as HTMLElement).closest('button')) {
-      return;
-    }
-
-    void startWindowDrag();
-  };
-
   return (
     <header
       className="relative z-50 flex h-12 items-center justify-between border-b border-border-light bg-white px-6"
       role="banner"
       data-tauri-drag-region
-      onMouseDown={handleStartDragging}
     >
       <div className="flex flex-1 items-center gap-3 select-none pointer-events-none">
         <img src="/brand/logo.png" alt="imageasy logo" className="h-8 w-8 shrink-0 rounded-lg object-cover" />

@@ -38,6 +38,8 @@ zip = { version = "2", default-features = false, features = ["deflate"] }
 webpx = { version = "0.4", default-features = false, features = ["encode", "std"] }
 sysinfo = { version = "0.37", default-features = false, features = ["system"] }
 tokio = { version = "1", features = ["sync", "rt", "macros", "time"] }
+jpeg-encoder = "0.7.1"
+lcms2 = { version = "6.1.1", features = ["static"] }
 
 [target.'cfg(windows)'.dependencies]
 windows = { version = "0.61", features = [
