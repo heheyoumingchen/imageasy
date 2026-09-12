@@ -61,32 +61,23 @@ function stageFrom(source, triple) {
 function buildHelperWithoutExternalBin() {
   const original = readFileSync(CONF_PATH, 'utf8');
   const conf = JSON.parse(original);
-  const backup = conf.bundle?.externalBin;
   if (conf.bundle) {
     delete conf.bundle.externalBin;
   }
-  const tempConfPath = join(TAURI_DIR, 'tauri.conf.bootstrap.json');
-  writeFileSync(tempConfPath, JSON.stringify(conf, null, 2));
+  // cargo build 不经过 tauri CLI，无法用 TAURI_CONFIG 内联 JSON 覆盖
+  // （tauri-build 会把该值当作 JSON 文本解析，传路径会直接报错），
+  // 只能临时改写 tauri.conf.json，构建后立即恢复。
+  writeFileSync(CONF_PATH, JSON.stringify(conf, null, 2));
 
   try {
     console.log('[ensure-sidecar] building helper without externalBin check...');
     execSync('cargo build --manifest-path src-tauri/Cargo.toml --release --bin document-renderer-helper', {
       cwd: PROJECT_ROOT,
       stdio: 'inherit',
-      env: {
-        ...process.env,
-        TAURI_CONFIG: tempConfPath,
-      },
     });
   } finally {
-    if (existsSync(tempConfPath)) {
-      unlinkSync(tempConfPath);
-    }
     // 确保原始 conf 未被改写
     writeFileSync(CONF_PATH, original);
-    if (backup) {
-      // no-op: original already restored
-    }
   }
 }
 
