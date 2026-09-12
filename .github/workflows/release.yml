@@ -1,0 +1,71 @@
+name: release
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "发布标签（例如 v0.1.0）"
+        required: true
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build-macos:
+    name: macOS (Apple Silicon)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.33.0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Download PDFium runtime (macOS arm64)
+        run: |
+          curl -sSL -o /tmp/pdfium-mac-arm64.tgz \
+            https://github.com/bblanchon/pdfium-binaries/releases/latest/download/pdfium-mac-arm64.tgz
+          mkdir -p /tmp/pdfium
+          tar -xzf /tmp/pdfium-mac-arm64.tgz -C /tmp/pdfium
+          test -f /tmp/pdfium/lib/libpdfium.dylib
+          echo "PDFIUM_BIN_DIR=/tmp/pdfium/lib" >> "$GITHUB_ENV"
+
+      - name: Stage PDFium and sidecar
+        run: |
+          pnpm stage:pdfium
+          pnpm ensure:sidecar
+
+      - name: Build app, dmg and portable archive
+        run: |
+          pnpm exec tauri build --bundles app dmg
+          DMG_PATH=$(find src-tauri/target/release/bundle/dmg -name "*.dmg" | head -1)
+          echo "DMG_PATH=$DMG_PATH" >> "$GITHUB_ENV"
+          VERSION=$(node -p "require('./src-tauri/tauri.conf.json').version")
+          cd src-tauri/target/release/bundle/macos
+          ditto -c -k --sequesterRsrc --keepParent imageasy.app \
+            "$GITHUB_WORKSPACE/imageasy_${VERSION}_macos_arm64_portable.zip"
+
+      - name: Attach macOS artifacts to release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ inputs.tag || github.ref_name }}
+          files: |
+            ${{ env.DMG_PATH }}
+            imageasy_*_macos_arm64_portable.zip
