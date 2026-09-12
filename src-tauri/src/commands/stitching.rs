@@ -242,7 +242,8 @@ pub struct StitchImageFilesResult {
 #[tauri::command]
 pub async fn inspect_stitching_file(path: String) -> Result<InspectStitchingFileResult, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        inspect_stitching_file_impl(&path).map_err(crate::commands::error_message::to_user_error_string)
+        inspect_stitching_file_impl(&path)
+            .map_err(crate::commands::error_message::to_user_error_string)
     })
     .await
     .map_err(crate::commands::error_message::to_user_error_string)?
@@ -253,7 +254,8 @@ pub async fn inspect_stitching_directory(
     path: String,
 ) -> Result<Vec<InspectStitchingFileResult>, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        inspect_stitching_directory_impl(&path).map_err(crate::commands::error_message::to_user_error_string)
+        inspect_stitching_directory_impl(&path)
+            .map_err(crate::commands::error_message::to_user_error_string)
     })
     .await
     .map_err(crate::commands::error_message::to_user_error_string)?
@@ -264,7 +266,8 @@ pub async fn stitch_image_files(
     request: StitchImageFilesRequest,
 ) -> Result<StitchImageFilesResult, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        stitch_image_files_impl(request).map_err(crate::commands::error_message::to_user_error_string)
+        stitch_image_files_impl(request)
+            .map_err(crate::commands::error_message::to_user_error_string)
     })
     .await
     .map_err(crate::commands::error_message::to_user_error_string)?
@@ -602,9 +605,8 @@ fn stitch_image_files_impl(request: StitchImageFilesRequest) -> Result<StitchIma
     let tiles = prepared
         .par_iter()
         .map(|cell| {
-            let dimensions = image::image_dimensions(&cell.source).with_context(|| {
-                format!("无法读取图片尺寸: {}", cell.source_label)
-            })?;
+            let dimensions = image::image_dimensions(&cell.source)
+                .with_context(|| format!("无法读取图片尺寸: {}", cell.source_label))?;
             let placed = image_pipeline::render_cover_tile(
                 &cell.source,
                 geometry::Size {

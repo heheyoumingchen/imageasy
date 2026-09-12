@@ -601,7 +601,8 @@ pub async fn inspect_download_source(
     request: InspectDownloadSourceRequest,
     window: Window,
 ) -> Result<InspectDownloadSourceResult, String> {
-    inspect_download_source_impl(request, window).map_err(crate::commands::error_message::to_user_error_string)
+    inspect_download_source_impl(request, window)
+        .map_err(crate::commands::error_message::to_user_error_string)
 }
 
 #[tauri::command]

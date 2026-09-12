@@ -249,7 +249,7 @@ fn convert_image_file_writes_requested_format() {
         color_mode: "rgb".into(),
         quality: Some(88),
         allow_source_overwrite: false,
-    task_id: None,
+        task_id: None,
     })
     .unwrap();
 
@@ -282,7 +282,7 @@ fn convert_image_file_reencodes_jpeg_family_to_requested_jpg_name() {
         color_mode: "grayscale".into(),
         quality: Some(80),
         allow_source_overwrite: false,
-    task_id: None,
+        task_id: None,
     })
     .unwrap();
 
@@ -313,7 +313,7 @@ fn convert_image_file_writes_single_channel_grayscale_png() {
         color_mode: "grayscale".into(),
         quality: Some(90),
         allow_source_overwrite: false,
-    task_id: None,
+        task_id: None,
     })
     .unwrap();
 
@@ -372,7 +372,7 @@ fn jpeg_sof_component_count(bytes: &[u8]) -> Option<u8> {
             return None;
         }
         let length = u16::from_be_bytes([bytes[index + 2], bytes[index + 3]]) as usize;
-        if matches!(marker, 0xC0 | 0xC1 | 0xC2) {
+        if matches!(marker, 0xC0..=0xC2) {
             return bytes.get(index + 9).copied();
         }
         index = index.saturating_add(2).saturating_add(length);
@@ -422,7 +422,7 @@ fn convert_image_file_writes_single_channel_grayscale_webp() {
         color_mode: "grayscale".into(),
         quality: Some(90),
         allow_source_overwrite: false,
-    task_id: None,
+        task_id: None,
     })
     .unwrap();
 
@@ -454,7 +454,7 @@ fn convert_image_file_applies_webp_quality() {
         color_mode: "rgb".into(),
         quality: Some(30),
         allow_source_overwrite: false,
-    task_id: None,
+        task_id: None,
     })
     .unwrap();
     let high_output = run_convert_image_file(ConvertImageFileRequest {
@@ -464,7 +464,7 @@ fn convert_image_file_applies_webp_quality() {
         color_mode: "rgb".into(),
         quality: Some(90),
         allow_source_overwrite: false,
-    task_id: None,
+        task_id: None,
     })
     .unwrap();
 
@@ -504,7 +504,7 @@ fn convert_image_file_jpeg_copy_is_byte_identical_at_quality_100() {
         color_mode: "rgb".into(),
         quality: Some(100),
         allow_source_overwrite: false,
-    task_id: None,
+        task_id: None,
     })
     .unwrap();
 
@@ -530,7 +530,7 @@ fn convert_image_file_jpeg_copy_reencodes_when_quality_is_99() {
         color_mode: "rgb".into(),
         quality: Some(99),
         allow_source_overwrite: false,
-    task_id: None,
+        task_id: None,
     })
     .unwrap();
 
@@ -559,7 +559,7 @@ fn convert_image_file_jpeg_copy_reencodes_when_color_mode_is_grayscale() {
         color_mode: "grayscale".into(),
         quality: Some(100),
         allow_source_overwrite: false,
-    task_id: None,
+        task_id: None,
     })
     .unwrap();
 
@@ -583,7 +583,7 @@ fn convert_image_file_jpeg_copy_rejects_non_jpeg_bytes_with_jpg_extension() {
         color_mode: "rgb".into(),
         quality: Some(100),
         allow_source_overwrite: false,
-    task_id: None,
+        task_id: None,
     })
     .unwrap_err();
 
@@ -604,7 +604,7 @@ fn convert_image_file_reencodes_in_place_when_source_overwrite_authorized() {
         color_mode: "rgb".into(),
         quality: Some(100),
         allow_source_overwrite: true,
-    task_id: None,
+        task_id: None,
     })
     .unwrap();
 
@@ -628,7 +628,7 @@ fn convert_image_file_rejects_same_source_output_without_authorization() {
         color_mode: "rgb".into(),
         quality: Some(90),
         allow_source_overwrite: false,
-    task_id: None,
+        task_id: None,
     })
     .unwrap_err();
 
@@ -650,7 +650,7 @@ fn convert_image_file_rejects_missing_source() {
         color_mode: "rgb".into(),
         quality: Some(90),
         allow_source_overwrite: false,
-    task_id: None,
+        task_id: None,
     })
     .unwrap_err();
 
@@ -670,7 +670,7 @@ fn convert_image_file_rejects_directory_source() {
         color_mode: "rgb".into(),
         quality: Some(90),
         allow_source_overwrite: false,
-    task_id: None,
+        task_id: None,
     })
     .unwrap_err();
 
@@ -694,7 +694,7 @@ fn convert_image_file_rejects_unsupported_output_format() {
         color_mode: "rgb".into(),
         quality: Some(90),
         allow_source_overwrite: false,
-    task_id: None,
+        task_id: None,
     })
     .unwrap_err();
 
@@ -717,7 +717,7 @@ fn convert_image_file_rejects_unsupported_color_mode() {
         color_mode: "sepia".into(),
         quality: Some(90),
         allow_source_overwrite: false,
-    task_id: None,
+        task_id: None,
     })
     .unwrap_err();
 
@@ -741,7 +741,7 @@ fn convert_image_file_rejects_out_of_range_quality() {
             color_mode: "rgb".into(),
             quality,
             allow_source_overwrite: false,
-        task_id: None,
+            task_id: None,
         })
         .unwrap_err();
 
@@ -782,7 +782,7 @@ fn document_render_request(
         page_numbers: vec![],
         render_density: "high".into(),
         naming_pattern: "source-name-index".into(),
-    task_id: None,
+        task_id: None,
     }
 }
 

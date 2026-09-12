@@ -211,7 +211,7 @@ fn extract_document_images_writes_output_files_from_image_sources() {
         quality: 90,
         naming_pattern: "source-name-index".into(),
         include_output_paths: Some(true),
-    task_id: None,
+        task_id: None,
     })
     .unwrap();
 
@@ -241,7 +241,7 @@ fn extract_document_images_extracts_embedded_images_from_pdf() {
         quality: 90,
         naming_pattern: "source-name-index".into(),
         include_output_paths: Some(true),
-    task_id: None,
+        task_id: None,
     })
     .unwrap();
 
@@ -280,7 +280,7 @@ fn inspect_and_extract_return_zero_for_pdf_without_embedded_images() {
         quality: 90,
         naming_pattern: "source-name-index".into(),
         include_output_paths: Some(true),
-    task_id: None,
+        task_id: None,
     })
     .unwrap();
 
@@ -302,7 +302,7 @@ fn extract_document_images_extracts_docx_without_soffice() {
         quality: 90,
         naming_pattern: "source-name-index".into(),
         include_output_paths: Some(true),
-    task_id: None,
+        task_id: None,
     })
     .unwrap();
 
@@ -333,7 +333,7 @@ fn extract_document_images_extracts_pptx_original_images_without_recoloring() {
         quality: 90,
         naming_pattern: "source-name-index".into(),
         include_output_paths: Some(true),
-    task_id: None,
+        task_id: None,
     })
     .unwrap();
 
@@ -365,7 +365,7 @@ fn extract_document_images_skips_unsupported_pptx_media_files() {
         quality: 90,
         naming_pattern: "source-name-index".into(),
         include_output_paths: Some(true),
-    task_id: None,
+        task_id: None,
     })
     .unwrap();
 
@@ -391,7 +391,7 @@ fn extract_document_images_counts_existing_pptx_outputs_as_completed() {
         quality: 90,
         naming_pattern: "source-name-index".into(),
         include_output_paths: Some(true),
-    task_id: None,
+        task_id: None,
     })
     .unwrap();
     assert_eq!(first.extracted_count, 1);
@@ -406,7 +406,7 @@ fn extract_document_images_counts_existing_pptx_outputs_as_completed() {
         quality: 90,
         naming_pattern: "source-name-index".into(),
         include_output_paths: Some(true),
-    task_id: None,
+        task_id: None,
     })
     .unwrap();
     assert_eq!(second.extracted_count, 1);
@@ -441,7 +441,7 @@ fn extract_document_images_returns_zero_for_docx_without_images() {
         quality: 90,
         naming_pattern: "source-name-index".into(),
         include_output_paths: Some(true),
-    task_id: None,
+        task_id: None,
     })
     .unwrap();
 

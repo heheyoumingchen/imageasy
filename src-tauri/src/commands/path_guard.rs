@@ -83,7 +83,9 @@ pub fn ensure_output_file_path(path: &Path) -> Result<PathBuf> {
         bail!("输出路径缺少有效文件名");
     }
 
-    let parent = path.parent().filter(|parent| !parent.as_os_str().is_empty());
+    let parent = path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty());
     let parent = match parent {
         Some(parent) => ensure_output_directory(parent)?,
         None => std::env::current_dir().context("无法获取当前目录")?,
@@ -105,7 +107,10 @@ fn reject_path_traversal_components(path: &Path) -> Result<()> {
 
 /// 拒绝写入/打开明显危险的系统目录，降低被劫持前端后的破坏面。
 pub fn reject_sensitive_system_path(path: &Path) -> Result<()> {
-    let normalized = path.to_string_lossy().replace('/', "\\").to_ascii_lowercase();
+    let normalized = path
+        .to_string_lossy()
+        .replace('/', "\\")
+        .to_ascii_lowercase();
 
     #[cfg(windows)]
     {
@@ -128,9 +133,7 @@ pub fn reject_sensitive_system_path(path: &Path) -> Result<()> {
         // 盘符根目录本身不允许作为输出目录（如 C:\）。
         let bytes = normalized.as_bytes();
         let is_drive_root = (bytes.len() == 2 && bytes[1] == b':')
-            || (bytes.len() == 3
-                && bytes[1] == b':'
-                && (bytes[2] == b'\\' || bytes[2] == b'/'));
+            || (bytes.len() == 3 && bytes[1] == b':' && (bytes[2] == b'\\' || bytes[2] == b'/'));
         if is_drive_root {
             bail!("拒绝将盘符根目录作为输出目标");
         }
@@ -138,7 +141,17 @@ pub fn reject_sensitive_system_path(path: &Path) -> Result<()> {
 
     #[cfg(not(windows))]
     {
-        let sensitive_prefixes = ["/bin", "/sbin", "/usr/bin", "/usr/sbin", "/etc", "/boot", "/dev", "/proc", "/sys"];
+        let sensitive_prefixes = [
+            "/bin",
+            "/sbin",
+            "/usr/bin",
+            "/usr/sbin",
+            "/etc",
+            "/boot",
+            "/dev",
+            "/proc",
+            "/sys",
+        ];
         for prefix in sensitive_prefixes {
             if normalized == prefix || normalized.starts_with(&format!("{prefix}/")) {
                 bail!("拒绝访问受保护的系统路径");
@@ -185,7 +198,8 @@ mod tests {
     fn reject_sensitive_windows_system32() {
         #[cfg(windows)]
         {
-            let error = reject_sensitive_system_path(Path::new(r"C:\Windows\System32\drivers")).unwrap_err();
+            let error = reject_sensitive_system_path(Path::new(r"C:\Windows\System32\drivers"))
+                .unwrap_err();
             assert!(error.to_string().contains("受保护"));
         }
     }

@@ -59,7 +59,10 @@ where
 
 /// 启动 STA、创建应用并完成安全配置（不打开文档）。
 /// 失败时已尽量做了 release + uninitialize。
-pub fn bootstrap_application<B, P>(backend: &mut B, emit_progress: &mut P) -> Result<(), CommandError>
+pub fn bootstrap_application<B, P>(
+    backend: &mut B,
+    emit_progress: &mut P,
+) -> Result<(), CommandError>
 where
     B: AutomationBackend + ?Sized,
     P: FnMut(HelperProgressStage),
@@ -263,7 +266,11 @@ mod tests {
 
         // STA / CreateApp / ConfigureSecurity 只发生一次；Open/Export/Close 发生两次。
         assert_eq!(
-            backend.events.iter().filter(|e| **e == Event::InitSta).count(),
+            backend
+                .events
+                .iter()
+                .filter(|e| **e == Event::InitSta)
+                .count(),
             1
         );
         assert_eq!(

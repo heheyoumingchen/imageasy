@@ -41,7 +41,7 @@ fn redact_windows_paths(input: &str) -> String {
             i += 2;
             while i < chars.len() {
                 let c = chars[i];
-                if c.is_whitespace() || matches!(c, '"' | '\'' | ')' | ',' ) {
+                if c.is_whitespace() || matches!(c, '"' | '\'' | ')' | ',') {
                     break;
                 }
                 i += 1;

@@ -407,12 +407,8 @@ where
         let (page_count, error_message) = match count_pages(&source) {
             Ok(count) => (Some(count), None),
             Err(error) => {
-                let redacted =
-                    crate::commands::error_message::to_user_error_string(error);
-                (
-                    None,
-                    Some(format!("已导入，但暂无法读取页数：{redacted}")),
-                )
+                let redacted = crate::commands::error_message::to_user_error_string(error);
+                (None, Some(format!("已导入，但暂无法读取页数：{redacted}")))
             }
         };
         return Ok(InspectConversionFileResult {
@@ -491,7 +487,8 @@ pub fn inspect_conversion_file_with_counter<C>(
 where
     C: FnMut(&Path) -> Result<u32>,
 {
-    inspect_conversion_file_impl(path, count_pages).map_err(crate::commands::error_message::to_user_error_string)
+    inspect_conversion_file_impl(path, count_pages)
+        .map_err(crate::commands::error_message::to_user_error_string)
 }
 
 /// 测试用：以注入的 PDF 页数计数器扫描目录。
@@ -1386,9 +1383,12 @@ fn execute_document_render_job(
 }
 
 fn cancelled_command_error(error: anyhow::Error) -> CommandError {
-    CommandError::new(CommandErrorCode::InternalError, cancellation::CANCELLED_MESSAGE)
-        .with_stage(RendererStage::Cleanup)
-        .with_diagnostic(error.to_string())
+    CommandError::new(
+        CommandErrorCode::InternalError,
+        cancellation::CANCELLED_MESSAGE,
+    )
+    .with_stage(RendererStage::Cleanup)
+    .with_diagnostic(error.to_string())
 }
 
 fn document_pipeline_error(

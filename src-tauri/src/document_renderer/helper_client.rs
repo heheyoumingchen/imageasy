@@ -345,12 +345,10 @@ impl HelperTransport for LiveTransport {
         }
     }
 
-    fn next_event(&mut self) -> impl Future<Output = Option<HelperEvent>> + Send {
-        async move {
-            match self {
-                Self::Sidecar(transport) => transport.next_event().await,
-                Self::Local(transport) => transport.next_event().await,
-            }
+    async fn next_event(&mut self) -> Option<HelperEvent> {
+        match self {
+            Self::Sidecar(transport) => transport.next_event().await,
+            Self::Local(transport) => transport.next_event().await,
         }
     }
 
@@ -366,8 +364,7 @@ struct PooledHelper {
     transport: LiveTransport,
 }
 
-static HELPER_POOL: tokio::sync::Mutex<Option<PooledHelper>> =
-    tokio::sync::Mutex::const_new(None);
+static HELPER_POOL: tokio::sync::Mutex<Option<PooledHelper>> = tokio::sync::Mutex::const_new(None);
 
 /// 启动一次 Office helper 请求。成功时保留子进程供后续文档复用。
 pub async fn run_helper<R: Runtime>(

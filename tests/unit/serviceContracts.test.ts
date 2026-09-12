@@ -106,7 +106,8 @@ describe('service layer invoke contracts', () => {
 
     expect(error).toBeInstanceOf(Error);
     const normalized = error as Error & { code?: string; diagnostic?: string; rendererKind?: string };
-    expect(normalized.message).toBe('未检测到 Word');
+    // 规范化会把 diagnostic 以「（diagnostic）」形式附加到 message 末尾。
+    expect(normalized.message).toBe('未检测到 Word（CoCreateInstance 失败）');
     expect(normalized.message).not.toContain('[object Object]');
     expect(normalized.code).toBe('WORD_RENDERER_NOT_AVAILABLE');
     expect(normalized.rendererKind).toBe('word');

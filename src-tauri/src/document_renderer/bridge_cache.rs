@@ -233,10 +233,7 @@ mod tests {
 
         let (clone_dir, clone_path) = try_clone_cached_bridge(&source).unwrap().unwrap();
         assert!(clone_path.ends_with(BRIDGE_FILE_NAME));
-        assert_eq!(
-            fs::read(&clone_path).unwrap(),
-            fs::read(&exported).unwrap()
-        );
+        assert_eq!(fs::read(&clone_path).unwrap(), fs::read(&exported).unwrap());
         // 调用方拿到的是独立副本，drop 后不影响 master。
         drop(clone_dir);
         assert!(try_clone_cached_bridge(&source).unwrap().is_some());

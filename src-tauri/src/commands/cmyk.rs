@@ -15,8 +15,10 @@ type CmykTransform = Transform<u8, u8>;
 fn with_cmyk_transform<T>(run: impl FnOnce(&CmykTransform) -> T) -> Result<T> {
     static TRANSFORM: OnceLock<Result<Mutex<CmykTransform>, String>> = OnceLock::new();
     let stored = TRANSFORM.get_or_init(|| {
-        let srgb = Profile::new_icc(SRGB_ICC).map_err(|error| format!("无法解析 sRGB ICC: {error}"))?;
-        let swop = Profile::new_icc(SWOP_ICC).map_err(|error| format!("无法解析 SWOP ICC: {error}"))?;
+        let srgb =
+            Profile::new_icc(SRGB_ICC).map_err(|error| format!("无法解析 sRGB ICC: {error}"))?;
+        let swop =
+            Profile::new_icc(SWOP_ICC).map_err(|error| format!("无法解析 SWOP ICC: {error}"))?;
         let transform = Transform::new_flags(
             &srgb,
             PixelFormat::RGB_8,
@@ -28,7 +30,9 @@ fn with_cmyk_transform<T>(run: impl FnOnce(&CmykTransform) -> T) -> Result<T> {
         .map_err(|error| format!("无法创建 sRGB→CMYK 转换: {error}"))?;
         Ok(Mutex::new(transform))
     });
-    let transform = stored.as_ref().map_err(|message| anyhow::anyhow!("{message}"))?;
+    let transform = stored
+        .as_ref()
+        .map_err(|message| anyhow::anyhow!("{message}"))?;
     let guard = transform
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
@@ -83,7 +87,10 @@ mod tests {
         let rgb = ImageBuffer::<Rgb<u8>, _>::from_pixel(1, 1, Rgb([255, 255, 255]));
         let cmyk = rgb_image_to_cmyk_bytes(&rgb).unwrap();
         assert_eq!(cmyk.len(), 4);
-        assert!(cmyk.iter().all(|channel| *channel < 8), "white CMYK={cmyk:?}");
+        assert!(
+            cmyk.iter().all(|channel| *channel < 8),
+            "white CMYK={cmyk:?}"
+        );
     }
 
     #[test]

@@ -70,7 +70,8 @@ pub struct SplitImageFileResult {
 #[tauri::command]
 pub async fn inspect_splitting_file(path: String) -> Result<InspectSplittingFileResult, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        inspect_splitting_file_impl(&path).map_err(crate::commands::error_message::to_user_error_string)
+        inspect_splitting_file_impl(&path)
+            .map_err(crate::commands::error_message::to_user_error_string)
     })
     .await
     .map_err(crate::commands::error_message::to_user_error_string)?
@@ -81,7 +82,8 @@ pub async fn inspect_splitting_directory(
     path: String,
 ) -> Result<Vec<InspectSplittingFileResult>, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        inspect_splitting_directory_impl(&path).map_err(crate::commands::error_message::to_user_error_string)
+        inspect_splitting_directory_impl(&path)
+            .map_err(crate::commands::error_message::to_user_error_string)
     })
     .await
     .map_err(crate::commands::error_message::to_user_error_string)?
@@ -94,7 +96,8 @@ pub async fn split_image_file(
 ) -> Result<SplitImageFileResult, String> {
     let resource_dir = app.path().resource_dir().ok();
     tauri::async_runtime::spawn_blocking(move || {
-        split_image_file_impl(request, resource_dir).map_err(crate::commands::error_message::to_user_error_string)
+        split_image_file_impl(request, resource_dir)
+            .map_err(crate::commands::error_message::to_user_error_string)
     })
     .await
     .map_err(crate::commands::error_message::to_user_error_string)?

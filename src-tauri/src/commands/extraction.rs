@@ -81,7 +81,8 @@ enum PdfImageOutput {
 #[tauri::command]
 pub async fn inspect_extraction_document(path: String) -> Result<ExtractionDocumentInfo, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        inspect_extraction_document_impl(&path).map_err(crate::commands::error_message::to_user_error_string)
+        inspect_extraction_document_impl(&path)
+            .map_err(crate::commands::error_message::to_user_error_string)
     })
     .await
     .map_err(crate::commands::error_message::to_user_error_string)?
@@ -92,7 +93,8 @@ pub async fn inspect_extraction_directory(
     path: String,
 ) -> Result<Vec<ExtractionDocumentInfo>, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        inspect_extraction_directory_impl(&path).map_err(crate::commands::error_message::to_user_error_string)
+        inspect_extraction_directory_impl(&path)
+            .map_err(crate::commands::error_message::to_user_error_string)
     })
     .await
     .map_err(crate::commands::error_message::to_user_error_string)?
@@ -103,7 +105,8 @@ pub async fn extract_document_images(
     request: ExtractDocumentImagesRequest,
 ) -> Result<ExtractDocumentImagesResult, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        extract_document_images_impl(request).map_err(crate::commands::error_message::to_user_error_string)
+        extract_document_images_impl(request)
+            .map_err(crate::commands::error_message::to_user_error_string)
     })
     .await
     .map_err(crate::commands::error_message::to_user_error_string)?
@@ -316,7 +319,13 @@ fn write_image_copy(
     let image =
         image::open(source).with_context(|| format!("无法读取嵌入图片: {}", source.display()))?;
     let image = apply_color_mode(image, color_mode);
-    write_dynamic_image(output_path, &image, output_format, Some(quality), color_mode)
+    write_dynamic_image(
+        output_path,
+        &image,
+        output_format,
+        Some(quality),
+        color_mode,
+    )
 }
 
 /// Office media 中当前解码链路可提取的栅格扩展名；矢量/专有格式（emf/wmf/svg/wdp 等）不计预计数。
@@ -507,11 +516,23 @@ fn write_pdf_image_output(
         PdfImageOutput::OriginalBytes { bytes, .. } => {
             let image = image::load_from_memory(&bytes).context("无法读取原始 PDF 图片流")?;
             let image = apply_color_mode(image, color_mode);
-            write_dynamic_image(output_path, &image, requested_format, Some(quality), color_mode)
+            write_dynamic_image(
+                output_path,
+                &image,
+                requested_format,
+                Some(quality),
+                color_mode,
+            )
         }
         PdfImageOutput::DecodedImage(image) => {
             let image = apply_color_mode(image, color_mode);
-            write_dynamic_image(output_path, &image, requested_format, Some(quality), color_mode)
+            write_dynamic_image(
+                output_path,
+                &image,
+                requested_format,
+                Some(quality),
+                color_mode,
+            )
         }
     }
 }

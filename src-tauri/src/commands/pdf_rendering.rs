@@ -1,10 +1,10 @@
+use crate::document_renderer::timing::log_stage_timing;
 use anyhow::{Context, Result};
 use image::{DynamicImage, GrayImage, RgbImage};
 use pdfium_render::prelude::*;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Instant;
-use crate::document_renderer::timing::log_stage_timing;
 
 #[derive(Debug)]
 pub struct RenderedPdfPage {
@@ -511,6 +511,7 @@ fn build_render_config(target_width: i32) -> PdfRenderConfig {
 }
 
 /// 并行渲染：worker 完成即送入 channel；主线程按选择顺序回调，避免攒齐所有页。
+#[allow(clippy::too_many_arguments)]
 fn render_pdf_pages_parallel_streaming<F>(
     source_path: &Path,
     resource_dir: Option<&Path>,
@@ -526,7 +527,7 @@ where
 {
     let source_path = source_path.to_path_buf();
     let resource_dir = resource_dir.map(Path::to_path_buf);
-    let cancel_flag = cancel.map(|token| token.clone());
+    let cancel_flag = cancel.cloned();
     let chunks = split_pages_for_workers(selected_pages, threads);
     let failed = std::sync::Arc::new(AtomicBool::new(false));
     let (tx, rx) = std::sync::mpsc::channel::<Result<RenderedPdfPage>>();
@@ -616,8 +617,10 @@ where
                 received += 1;
                 let Some(&index) = order.get(&page.page_number) else {
                     failed.store(true, Ordering::Relaxed);
-                    first_error =
-                        Some(anyhow::anyhow!("PDF 渲染器返回了未规划的页面 {}", page.page_number));
+                    first_error = Some(anyhow::anyhow!(
+                        "PDF 渲染器返回了未规划的页面 {}",
+                        page.page_number
+                    ));
                     break;
                 };
                 pending.insert(index, page);
@@ -675,7 +678,10 @@ fn split_pages_for_workers(pages: &[u32], threads: usize) -> Vec<Vec<u32>> {
     for (index, page) in pages.iter().copied().enumerate() {
         chunks[index % threads].push(page);
     }
-    chunks.into_iter().filter(|chunk| !chunk.is_empty()).collect()
+    chunks
+        .into_iter()
+        .filter(|chunk| !chunk.is_empty())
+        .collect()
 }
 
 pub fn render_pdf_pages_with_callback<F>(
@@ -905,9 +911,7 @@ mod tests {
             .map(|index| format!("{} 0 R", 3 + index * 2))
             .collect::<Vec<_>>()
             .join(" ");
-        objects.push(
-            b"1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n".to_vec(),
-        );
+        objects.push(b"1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n".to_vec());
         objects.push(
             format!(
                 "2 0 obj\n<< /Type /Pages /Kids [{pages_kids}] /Count {page_count} >>\nendobj\n"

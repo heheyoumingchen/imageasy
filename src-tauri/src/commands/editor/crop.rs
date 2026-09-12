@@ -17,7 +17,8 @@ static WORKING_IMAGE_COUNTER: AtomicU64 = AtomicU64::new(0);
 pub fn commit_crop_to_working_image(
     request: CommitCropRequest,
 ) -> Result<CommitCropResult, String> {
-    commit_crop_to_working_image_impl(request).map_err(crate::commands::error_message::to_user_error_string)
+    commit_crop_to_working_image_impl(request)
+        .map_err(crate::commands::error_message::to_user_error_string)
 }
 
 fn commit_crop_to_working_image_impl(request: CommitCropRequest) -> Result<CommitCropResult> {

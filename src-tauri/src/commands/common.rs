@@ -327,7 +327,11 @@ mod tests {
     fn cmyk_jpeg_write_is_decoded_as_cmyk32() {
         let dir = tempdir().unwrap();
         let target = dir.path().join("cmyk.jpg");
-        let rgb = DynamicImage::ImageRgb8(ImageBuffer::<Rgb<u8>, _>::from_pixel(8, 6, Rgb([200, 20, 30])));
+        let rgb = DynamicImage::ImageRgb8(ImageBuffer::<Rgb<u8>, _>::from_pixel(
+            8,
+            6,
+            Rgb([200, 20, 30]),
+        ));
 
         write_dynamic_image(&target, &rgb, "jpg", Some(90), "cmyk").unwrap();
 
@@ -344,7 +348,8 @@ mod tests {
     fn cmyk_png_is_rejected() {
         let dir = tempdir().unwrap();
         let target = dir.path().join("cmyk.png");
-        let rgb = DynamicImage::ImageRgb8(ImageBuffer::<Rgb<u8>, _>::from_pixel(2, 2, Rgb([1, 2, 3])));
+        let rgb =
+            DynamicImage::ImageRgb8(ImageBuffer::<Rgb<u8>, _>::from_pixel(2, 2, Rgb([1, 2, 3])));
 
         let error = write_dynamic_image(&target, &rgb, "png", Some(90), "cmyk").unwrap_err();
         assert!(error.to_string().contains("CMYK 仅支持 JPG"));

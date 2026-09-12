@@ -174,7 +174,8 @@ pub async fn open_image_session(path: String) -> Result<OpenImageSessionResult, 
 #[tauri::command]
 pub async fn generate_editor_thumbnail(path: String) -> Result<String, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        create_thumbnail_data_url(Path::new(&path), 128, 58).map_err(crate::commands::error_message::to_user_error_string)
+        create_thumbnail_data_url(Path::new(&path), 128, 58)
+            .map_err(crate::commands::error_message::to_user_error_string)
     })
     .await
     .map_err(crate::commands::error_message::to_user_error_string)?

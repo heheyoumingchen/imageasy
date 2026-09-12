@@ -108,8 +108,10 @@ fn settings_path() -> Result<PathBuf> {
 
 #[tauri::command]
 pub fn load_settings() -> Result<PersistedSettings, String> {
-    load_settings_from_path(&settings_path().map_err(crate::commands::error_message::to_user_error_string)?)
-        .map_err(crate::commands::error_message::to_user_error_string)
+    load_settings_from_path(
+        &settings_path().map_err(crate::commands::error_message::to_user_error_string)?,
+    )
+    .map_err(crate::commands::error_message::to_user_error_string)
 }
 
 #[tauri::command]

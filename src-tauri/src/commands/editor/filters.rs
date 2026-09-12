@@ -24,7 +24,8 @@ pub async fn generate_image_preview(
     request: GenerateImagePreviewRequest,
 ) -> Result<GenerateImagePreviewResult, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        generate_image_preview_impl(request).map_err(crate::commands::error_message::to_user_error_string)
+        generate_image_preview_impl(request)
+            .map_err(crate::commands::error_message::to_user_error_string)
     })
     .await
     .map_err(crate::commands::error_message::to_user_error_string)?
