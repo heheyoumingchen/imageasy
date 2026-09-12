@@ -25,3 +25,19 @@ src-tauri/target/conversion-benchmark.json
 
 # Claude worktrees（内嵌 git 仓库）
 .claude/worktrees/
+
+# 本地设计稿与工作文档（不入库）
+设计稿/
+生产级清理分析报告.txt
+PDF_RENDERING_SETUP.md
+STITCHING_UPDATE.md
+UI_MODIFICATIONS_SUMMARY.md
+
+# AI 助手个人配置（不入库）
+.claude/
+CLAUDE.md
+skills-lock.json
+docs/superpowers/
+
+# Tauri 构建自动生成的 schema
+src-tauri/gen/schemas/
