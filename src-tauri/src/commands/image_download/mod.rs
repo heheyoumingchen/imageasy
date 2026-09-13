@@ -69,8 +69,9 @@ pub struct SaveDownloadImagesResult {
     pub output_paths: Vec<String>,
 }
 
-// 部分站点（知乎、MSN 等）对非浏览器 UA 返回 403 或精简页面，需伪装成浏览器。
-const USER_AGENT: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36";
+// 部分站点（搜狐 itc.cn CDN 等）按 UA 版本号过滤旧浏览器，需保持较新的 Chrome 版本号；
+// 知乎为 TLS 指纹级反爬，伪装 UA 无法通过。
+const USER_AGENT: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36";
 const MAX_REDIRECTS: usize = 5;
 const MAX_IMAGE_BYTES: u64 = 50 * 1024 * 1024;
 const MAX_METADATA_PROBE_ITEMS: usize = 120;
