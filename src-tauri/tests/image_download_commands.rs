@@ -231,7 +231,7 @@ fn parse_wechat_article_images_only_returns_article_body_images() {
 }
 
 #[test]
-fn parse_wechat_article_images_returns_empty_without_article_container() {
+fn parse_wechat_article_images_falls_back_to_document_scan_without_article_container() {
     let html = r#"
       <html><body>
         <div class="profile_meta">
@@ -242,7 +242,29 @@ fn parse_wechat_article_images_returns_empty_without_article_container() {
 
     let result = parse_wechat_article_images("https://mp.weixin.qq.com/s/demo", html).unwrap();
 
-    assert!(result.is_empty());
+    // 找不到文章容器时不再返回空，而是回退为全文扫描。
+    assert_eq!(result.len(), 1);
+    assert_eq!(result[0].source_url, "https://mmbiz.qpic.cn/avatar.png");
+}
+
+#[test]
+fn parse_webpage_images_extracts_og_image_and_lazy_attrs() {
+    let html = r#"
+      <html>
+        <head>
+          <meta property="og:image" content="https://cdn.example.com/hero.jpg" />
+        </head>
+        <body>
+          <img data-actualsrc="https://pic.example.com/lazy-1.jpg" src="data:image/svg;base64,xxx" />
+        </body>
+      </html>
+    "#;
+
+    let result = parse_webpage_images("https://example.com/post", html).unwrap();
+
+    let urls: Vec<&str> = result.iter().map(|item| item.source_url.as_str()).collect();
+    assert!(urls.contains(&"https://cdn.example.com/hero.jpg"));
+    assert!(urls.contains(&"https://pic.example.com/lazy-1.jpg"));
 }
 
 #[test]

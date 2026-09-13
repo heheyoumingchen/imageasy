@@ -11,6 +11,7 @@ const { subscribeDownloadMetadata } = vi.hoisted(() => ({
 vi.mock('../../src/services/imageDownloadCommands', () => ({
   inspectDownloadSource: vi.fn(),
   saveDownloadImages: vi.fn(),
+  fetchDownloadThumbnail: vi.fn(),
   subscribeDownloadMetadata,
 }));
 
@@ -19,7 +20,7 @@ vi.mock('../../src/services/fileDialog', () => ({
   openDirectoryInSystem: vi.fn(),
 }));
 
-const { inspectDownloadSource, saveDownloadImages } = await import('../../src/services/imageDownloadCommands');
+const { inspectDownloadSource, saveDownloadImages, fetchDownloadThumbnail } = await import('../../src/services/imageDownloadCommands');
 const { chooseOutputDirectory } = await import('../../src/services/fileDialog');
 
 const inspectedImage = {
@@ -38,6 +39,7 @@ describe('ImageDownloadPage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     subscribeDownloadMetadata.mockResolvedValue(vi.fn());
+    vi.mocked(fetchDownloadThumbnail).mockResolvedValue('C:/cache/download-thumbnails/thumb-1.jpg');
     getSettingsStore().setState({ language: 'zh-CN' });
   });
 
@@ -175,14 +177,15 @@ describe('ImageDownloadPage', () => {
     expect(screen.getByRole('checkbox', { name: '全选' })).toBeInTheDocument();
     expect(screen.queryByText('示例文章')).not.toBeInTheDocument();
     expect(screen.queryByText('1/1')).not.toBeInTheDocument();
-    expect(screen.getByRole('img', { name: '示例图片' })).toBeInTheDocument();
+    // 预览经后端缩略图代理，img 在缩略图解析完成后才渲染。
+    expect(await screen.findByRole('img', { name: '示例图片' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '下载 示例图片' })).toBeInTheDocument();
 
     const itemCard = container.querySelector('[data-testid="download-image-card"]');
     expect(itemCard?.className).toContain('rounded-lg');
     expect(itemCard?.className).not.toContain('border-meitu');
     expect(screen.getByRole('img', { name: '示例图片' }).className).toContain('rounded-md');
-    expect(screen.getByRole('img', { name: '示例图片' })).toHaveAttribute('referrerpolicy', 'no-referrer');
+    expect(fetchDownloadThumbnail).toHaveBeenCalledWith('https://example.com/post', 'https://example.com/a.jpg');
   });
 
   it('shows loading metadata first and updates size and format from metadata events', async () => {

@@ -602,10 +602,19 @@ struct LocalProcessTransport {
 }
 
 fn spawn_local_helper_transport(path: &Path) -> Result<LocalProcessTransport, String> {
-    let mut child = Command::new(path)
+    let mut command = Command::new(path);
+    command
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
+        .stderr(Stdio::piped());
+    // debug 构建的 helper 仍是控制台子系统，spawn 时抑制控制台窗口。
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        command.creation_flags(CREATE_NO_WINDOW);
+    }
+    let mut child = command
         .spawn()
         .map_err(|error| format!("spawn failed: {error}"))?;
 

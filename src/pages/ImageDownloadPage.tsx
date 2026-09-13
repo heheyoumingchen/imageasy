@@ -1,6 +1,12 @@
 import { useEffect, useRef, useState } from 'react';
+import { convertFileSrc } from '@tauri-apps/api/core';
 import { chooseOutputDirectory, openDirectoryInSystem } from '../services/fileDialog';
-import { inspectDownloadSource, saveDownloadImages, subscribeDownloadMetadata } from '../services/imageDownloadCommands';
+import {
+  fetchDownloadThumbnail,
+  inspectDownloadSource,
+  saveDownloadImages,
+  subscribeDownloadMetadata
+} from '../services/imageDownloadCommands';
 import { useLanguage } from '../hooks/useLanguage';
 import { formatFileSize } from '../utils/formatters';
 import { toErrorMessage } from '../utils/errors';
@@ -24,6 +30,8 @@ const ImageDownloadPage = () => {
   const [isInspecting, setIsInspecting] = useState(false);
   const [isDownloading, setIsDownloading] = useState(false);
   const [failedPreviewIds, setFailedPreviewIds] = useState<string[]>([]);
+  const [thumbnailPaths, setThumbnailPaths] = useState<Record<string, string>>({});
+  const thumbnailRequestedRef = useRef<Set<string>>(new Set());
   const selectAllRef = useRef<HTMLInputElement | null>(null);
 
   const copy = language === 'en-US'
@@ -105,17 +113,49 @@ const ImageDownloadPage = () => {
     setItems([]);
     setSelectedIds([]);
     setFailedPreviewIds([]);
+    setThumbnailPaths({});
+    thumbnailRequestedRef.current.clear();
     setIsInspecting(true);
     setPageError(null);
     try {
       const result = await inspectDownloadSource({ mode: resolveDownloadMode(trimmedUrl), url: trimmedUrl });
       setItems(result.images);
       setSelectedIds(result.images.map((item) => item.id));
+      // 预览经后端代理（带 Referer 绕过防盗链），不再直接热链远程图片。
+      loadThumbnails(trimmedUrl, result.images);
     } catch (error) {
       setPageError(toErrorMessage(error));
     } finally {
       setIsInspecting(false);
     }
+  };
+
+  const loadThumbnails = (pageUrl: string, list: DownloadableImageItem[]) => {
+    const queue = list.filter((item) => {
+      if (thumbnailRequestedRef.current.has(item.id)) {
+        return false;
+      }
+      thumbnailRequestedRef.current.add(item.id);
+      return true;
+    });
+    if (queue.length === 0) {
+      return;
+    }
+    let cursor = 0;
+    const workerCount = Math.min(4, queue.length);
+    const workers = Array.from({ length: workerCount }, async () => {
+      while (cursor < queue.length) {
+        const item = queue[cursor];
+        cursor += 1;
+        const cachedPath = await fetchDownloadThumbnail(pageUrl, item.sourceUrl);
+        if (cachedPath) {
+          setThumbnailPaths((current) => ({ ...current, [item.id]: cachedPath }));
+        } else {
+          setFailedPreviewIds((current) => (current.includes(item.id) ? current : [...current, item.id]));
+        }
+      }
+    });
+    void Promise.all(workers);
   };
 
   const handleChooseOutputDirectory = async () => {
@@ -260,11 +300,14 @@ const ImageDownloadPage = () => {
                           <div className="flex aspect-square w-full items-center justify-center rounded-md border border-dashed border-border-light bg-[#FBFCFE] text-xs font-semibold text-[#8D93A1]">
                             预览不可用
                           </div>
+                        ) : !thumbnailPaths[item.id] ? (
+                          <div className="flex aspect-square w-full items-center justify-center rounded-md border border-dashed border-border-light bg-[#FBFCFE] text-xs font-semibold text-[#8D93A1]">
+                            预览加载中…
+                          </div>
                         ) : (
                           <img
-                            src={item.previewUrl}
+                            src={convertFileSrc(thumbnailPaths[item.id])}
                             alt={displayTitle}
-                            referrerPolicy="no-referrer"
                             onError={() => markPreviewFailed(item.id)}
                             className="aspect-square w-full rounded-md object-cover"
                           />

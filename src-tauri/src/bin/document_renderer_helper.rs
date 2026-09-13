@@ -1,3 +1,6 @@
+// GUI 子系统：避免每次被主程序 spawn 时带出控制台窗口（协议走管道，不依赖控制台）
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+
 //! Office 文档渲染 helper 边车。
 //!
 //! 支持多请求会话：从 stdin 连续读取请求行，每行处理完后写一个 Result 终帧。

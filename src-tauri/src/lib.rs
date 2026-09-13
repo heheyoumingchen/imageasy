@@ -28,6 +28,7 @@ pub fn run() {
             commands::stitching::stitch_image_files,
             commands::image_download::inspect_download_source,
             commands::image_download::save_download_images,
+            commands::image_download::download_image_thumbnail,
             commands::settings::load_settings,
             commands::settings::save_settings,
             commands::system::get_app_cache_usage,

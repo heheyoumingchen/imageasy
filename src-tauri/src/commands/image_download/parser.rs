@@ -102,14 +102,26 @@ fn collect_images_from_html(
     let mut seen = BTreeSet::new();
     let mut items = Vec::new();
 
-    let roots: Vec<_> = if article_only {
+    let mut roots: Vec<_> = if article_only {
         document.select(&article_selector).collect()
     } else {
         vec![]
     };
 
-    if article_only && roots.is_empty() {
-        return Ok(Vec::new());
+    // 文章容器选择器未命中时（知乎 .Post-RichText、MSN JS 渲染页等），
+    // 退回全文扫描，避免 article_only 模式直接返回空结果。
+    let fell_back_to_document = article_only && roots.is_empty();
+    if fell_back_to_document {
+        roots.push(document.root_element());
+    }
+
+    // og:image / twitter:image 适用于 JS 渲染站（MSN 等静态 HTML 只剩元信息）。
+    for meta in document.select(
+        &scraper::Selector::parse("meta[property='og:image'], meta[name='twitter:image']").unwrap(),
+    ) {
+        if let Some(content) = meta.value().attr("content") {
+            push_image_item(&base, content.trim(), "", &mut seen, &mut items);
+        }
     }
 
     let img_nodes: Vec<_> = if article_only {
@@ -135,6 +147,7 @@ fn collect_images_from_html(
             node.value().attr("data-src"),
             node.value().attr("data-original"),
             node.value().attr("data-lazy-src"),
+            node.value().attr("data-actualsrc"),
             node.value().attr("src"),
         ]
         .into_iter()
@@ -185,7 +198,7 @@ fn collect_images_from_html(
         }
     }
 
-    if !article_only {
+    if !article_only || fell_back_to_document {
         for candidate in extract_image_urls_from_text(html) {
             push_image_item(&base, &candidate, "", &mut seen, &mut items);
         }

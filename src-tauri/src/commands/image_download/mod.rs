@@ -69,7 +69,8 @@ pub struct SaveDownloadImagesResult {
     pub output_paths: Vec<String>,
 }
 
-const USER_AGENT: &str = "Mozilla/5.0 (Tauri Image Download Helper)";
+// 部分站点（知乎、MSN 等）对非浏览器 UA 返回 403 或精简页面，需伪装成浏览器。
+const USER_AGENT: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36";
 const MAX_REDIRECTS: usize = 5;
 const MAX_IMAGE_BYTES: u64 = 50 * 1024 * 1024;
 const MAX_METADATA_PROBE_ITEMS: usize = 120;
@@ -610,4 +611,54 @@ pub async fn save_download_images(
     request: SaveDownloadImagesRequest,
 ) -> Result<SaveDownloadImagesResult, String> {
     save_download_images_impl(request).map_err(crate::commands::error_message::to_user_error_string)
+}
+
+const MAX_THUMBNAIL_BYTES: u64 = 20 * 1024 * 1024;
+
+/// 下载预览缩略图的磁盘缓存路径（统一降采样为 JPEG）。
+fn cached_thumbnail_jpeg_path(source_url: &str) -> Result<PathBuf> {
+    Ok(
+        download_thumbnail_cache_dir()?
+            .join(format!("{}.jpg", thumbnail_cache_key_for(source_url))),
+    )
+}
+
+/// 经后端代理拉取图片并降采样为缩略图，返回缓存文件路径。
+/// 直接热链远程图片做预览会被防盗链拦截，后端带 Referer 请求可绕过。
+pub fn download_image_thumbnail_impl(page_url: &str, source_url: &str) -> Result<String> {
+    let cached = cached_thumbnail_jpeg_path(source_url)?;
+    if cached.exists() {
+        return Ok(cached.to_string_lossy().into_owned());
+    }
+
+    let page = validate_public_https_url(page_url)?;
+    let response = fetch_response(source_url, Some(&page), Duration::from_secs(15))
+        .context("无法获取图片预览")?;
+    let mut bytes = Vec::new();
+    response
+        .into_reader()
+        .take(MAX_THUMBNAIL_BYTES)
+        .read_to_end(&mut bytes)
+        .context("无法读取图片内容")?;
+
+    let thumbnail = image::load_from_memory(&bytes)
+        .context("图片预览解码失败")?
+        .thumbnail(512, 512);
+    let mut jpeg = Vec::new();
+    image::codecs::jpeg::JpegEncoder::new_with_quality(&mut jpeg, 62)
+        .encode_image(&thumbnail)
+        .context("缩略图编码失败")?;
+
+    std::fs::create_dir_all(download_thumbnail_cache_dir()?)?;
+    std::fs::write(&cached, &jpeg).context("无法写入缩略图缓存")?;
+    Ok(cached.to_string_lossy().into_owned())
+}
+
+#[tauri::command]
+pub async fn download_image_thumbnail(
+    page_url: String,
+    source_url: String,
+) -> Result<String, String> {
+    download_image_thumbnail_impl(&page_url, &source_url)
+        .map_err(crate::commands::error_message::to_user_error_string)
 }
