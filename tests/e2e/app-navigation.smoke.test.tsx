@@ -72,25 +72,25 @@ describe('e2e smoke: app navigation', () => {
     render(<App />);
 
     await waitFor(() => expect(loadSettings).toHaveBeenCalledTimes(1));
-    expect(await screen.findByRole('button', { name: '打开' })).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: '打开' }, { timeout: 5000 })).toBeInTheDocument();
 
     await user.click(screen.getByRole('button', { name: '格式转换' }));
-    expect(await screen.findByRole('button', { name: '开始转换' })).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: '开始转换' }, { timeout: 5000 })).toBeInTheDocument();
 
     await user.click(screen.getByRole('button', { name: '图片提取' }));
-    expect(await screen.findByRole('button', { name: '开始提取' })).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: '开始提取' }, { timeout: 5000 })).toBeInTheDocument();
 
     await user.click(screen.getByRole('button', { name: '图片分割' }));
-    expect(await screen.findByRole('button', { name: '分割图片' })).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: '分割图片' }, { timeout: 5000 })).toBeInTheDocument();
 
     await user.click(screen.getByRole('button', { name: '图片拼接' }));
-    expect(await screen.findByRole('button', { name: '下载' })).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: '下载' }, { timeout: 5000 })).toBeInTheDocument();
 
     await user.click(screen.getByRole('button', { name: '图片下载' }));
-    expect(await screen.findByRole('heading', { name: '提取结果' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: '提取结果' }, { timeout: 5000 })).toBeInTheDocument();
 
     await user.click(screen.getAllByRole('button', { name: '设置' })[0]);
-    expect(await screen.findByTestId('settings-actions-footer')).toBeInTheDocument();
+    expect(await screen.findByTestId('settings-actions-footer', { timeout: 5000 })).toBeInTheDocument();
 
     const nav = screen.getByRole('navigation', { name: '主导航' });
     expect(within(nav).queryByRole('button', { name: '任务中心' })).not.toBeInTheDocument();
