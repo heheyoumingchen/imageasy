@@ -39,6 +39,13 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: src-tauri
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      # tauri-build 的 build.rs 会校验 externalBin（渲染 helper）存在，
+      # 该二进制不入库，冷检出的 CI 需要先构建并 stage 它。
+      - name: Stage document renderer helper (sidecar)
+        run: node scripts/ensure-sidecar.mjs
       - name: Format check
         run: cargo fmt --manifest-path src-tauri/Cargo.toml -- --check
       - name: Clippy
