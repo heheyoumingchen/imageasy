@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { getVersion } from '@tauri-apps/api/app';
 import { AboutCard, GeneralSettingsCard, TaskSettingsCard } from '../components/settings';
 import type { TaskOutputFormat, TaskSettingsCardCopy, TaskSettingsValue } from '../components/settings';
 import ConfirmDialog from '../components/feedback/ConfirmDialog';
@@ -57,6 +58,14 @@ const SettingsPage = () => {
     void getAppCacheUsage().then(setCacheUsage).catch(() => setCacheUsage(null));
   }, []);
 
+  // 版本号随 tauri.conf.json 自动同步，避免每次发版手改 UI 文案。
+  const [appVersionLabel, setAppVersionLabel] = useState('');
+  useEffect(() => {
+    void getVersion()
+      .then((version) => setAppVersionLabel(`v${version}`))
+      .catch(() => setAppVersionLabel(''));
+  }, []);
+
   const formState = buildFormState(draft, {
     theme: state.theme,
     language: state.language,
@@ -88,7 +97,7 @@ const SettingsPage = () => {
         rememberLastParams: 'Retain parameters on switch',
         aboutApp: 'About',
         appName: 'imageasy',
-        appVersion: 'v0.1.0',
+        appVersion: appVersionLabel,
         cacheTitle: 'Cache',
         cacheDescription: 'Clear download thumbnail cache and image editor temporary files without affecting system caches.',
         cacheSizeLabel: 'Cache Usage',
@@ -124,7 +133,7 @@ const SettingsPage = () => {
         rememberLastParams: '切换图片时保留调整参数',
         aboutApp: '关于软件',
         appName: 'imageasy',
-        appVersion: 'v0.1.0',
+        appVersion: appVersionLabel,
         cacheTitle: '缓存',
         cacheDescription: '清理图片下载缩略图缓存和图片编辑临时文件，不影响系统缓存。',
         cacheSizeLabel: '缓存占用',

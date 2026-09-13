@@ -1,6 +1,6 @@
 [package]
 name = "imageasy"
-version = "0.1.0"
+version = "0.1.1"
 description = "图片批量处理助手"
 authors = ["heheyouchen"]
 edition = "2021"

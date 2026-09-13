@@ -17,6 +17,10 @@ const { getAppCacheUsage, clearAppCache } = vi.hoisted(() => ({
   clearAppCache: vi.fn()
 }));
 
+vi.mock('@tauri-apps/api/app', () => ({
+  getVersion: vi.fn().mockResolvedValue('0.1.1')
+}));
+
 vi.mock('../../src/services/settingsCommands', () => ({
   loadSettings,
   saveSettings
@@ -176,7 +180,7 @@ describe('SettingsPage', () => {
     expect(logo.className).toContain('w-14');
     expect(aboutIdentity.className).toContain('gap-3');
     expect(within(aboutIdentity).getByText('imageasy')).toBeInTheDocument();
-    expect(within(aboutIdentity).getByText('v0.1.0')).toBeInTheDocument();
+    expect(await within(aboutIdentity).findByText('v0.1.1')).toBeInTheDocument();
   });
 
   it('opens a contact dialog from the about card', async () => {

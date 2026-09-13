@@ -45,10 +45,10 @@ Grab the latest build from the [**Releases**](https://github.com/heheyoumingchen
 
 | Platform | Package | Notes |
 | --- | --- | --- |
-| Windows 10+ (x64) | `imageasy_x.y.z_x64-setup.exe` | Installer (NSIS) |
-| Windows 10+ (x64) | `imageasy_x.y.z_portable.zip` | Portable, unzip and run |
-| macOS (Apple Silicon) | `imageasy_x.y.z_aarch64.dmg` | Standard disk image |
-| macOS (Apple Silicon) | `imageasy_x.y.z_macos_arm64_portable.zip` | Portable, unzip and run |
+| Windows 10+ (x64) | `imageasy_0.1.1_x64-setup.exe` | Installer (NSIS) |
+| Windows 10+ (x64) | `imageasy_0.1.1_x64_portable.zip` | Portable, unzip and run |
+| macOS (Apple Silicon) | `imageasy_0.1.1_aarch64.dmg` | Standard disk image |
+| macOS (Apple Silicon) | `imageasy_0.1.1_macos_arm64_portable.zip` | Portable, unzip and run |
 
 > If SmartScreen (Windows) or Gatekeeper (macOS) warns about an unsigned app, choose "Run anyway" / "Open anyway".
 

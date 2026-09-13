@@ -49,10 +49,10 @@
 
 | 平台 | 安装包 | 说明 |
 | --- | --- | --- |
-| Windows 10+ (x64) | `imageasy_x.y.z_x64-setup.exe` | 安装版（NSIS 安装向导） |
-| Windows 10+ (x64) | `imageasy_x.y.z_portable.zip` | 绿色便携版，解压即用 |
-| macOS (Apple Silicon) | `imageasy_x.y.z_aarch64.dmg` | 标准磁盘映像安装 |
-| macOS (Apple Silicon) | `imageasy_x.y.z_macos_arm64_portable.zip` | 便携版，解压即用 |
+| Windows 10+ (x64) | `imageasy_0.1.1_x64-setup.exe` | 安装版（NSIS 安装向导） |
+| Windows 10+ (x64) | `imageasy_0.1.1_x64_portable.zip` | 绿色便携版，解压即用 |
+| macOS (Apple Silicon) | `imageasy_0.1.1_aarch64.dmg` | 标准磁盘映像安装 |
+| macOS (Apple Silicon) | `imageasy_0.1.1_macos_arm64_portable.zip` | 便携版，解压即用 |
 
 > 首次安装未签名的包时，Windows 可能提示 SmartScreen、macOS 可能提示"无法验证开发者"，选择"仍要运行 / 仍要打开"即可。
 
