@@ -90,7 +90,7 @@ describe('e2e smoke: app navigation', () => {
     expect(await screen.findByRole('heading', { name: '提取结果' }, { timeout: 5000 })).toBeInTheDocument();
 
     await user.click(screen.getAllByRole('button', { name: '设置' })[0]);
-    expect(await screen.findByTestId('settings-actions-footer', { timeout: 5000 })).toBeInTheDocument();
+    expect(await screen.findByTestId('settings-actions-footer', undefined, { timeout: 5000 })).toBeInTheDocument();
 
     const nav = screen.getByRole('navigation', { name: '主导航' });
     expect(within(nav).queryByRole('button', { name: '任务中心' })).not.toBeInTheDocument();
