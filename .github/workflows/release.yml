@@ -14,6 +14,50 @@ permissions:
   contents: write
 
 jobs:
+  build-windows:
+    name: Windows x64
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.33.0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Download PDFium runtime (Windows x64)
+        shell: bash
+        run: |
+          curl -fsSL -o pdfium-win-x64.tgz https://github.com/bblanchon/pdfium-binaries/releases/latest/download/pdfium-win-x64.tgz
+          mkdir pdfium-dist
+          tar -xzf pdfium-win-x64.tgz -C pdfium-dist
+          test -f pdfium-dist/bin/pdfium.dll
+          echo "PDFIUM_BIN_DIR=$GITHUB_WORKSPACE/pdfium-dist/bin" >> "$GITHUB_ENV"
+
+      - name: Build installer and portable archive
+        run: pnpm tauri:portable
+
+      - name: Attach Windows artifacts to release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ inputs.tag || github.ref_name }}
+          files: |
+            src-tauri/target/release/bundle/nsis/*.exe
+            src-tauri/target/release/bundle/portable/*.zip
+
   build-macos:
     name: macOS (Apple Silicon)
     runs-on: macos-latest
