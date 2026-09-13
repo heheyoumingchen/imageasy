@@ -63,6 +63,9 @@ function buildHelperWithoutExternalBin() {
   const conf = JSON.parse(original);
   if (conf.bundle) {
     delete conf.bundle.externalBin;
+    // 引导构建只产出裸 helper，不校验打包资源；pdfium/* 等 glob
+    // 在干净检出上必然为空，会导致 build.rs 直接失败。
+    delete conf.bundle.resources;
   }
   // cargo build 不经过 tauri CLI，无法用 TAURI_CONFIG 内联 JSON 覆盖
   // （tauri-build 会把该值当作 JSON 文本解析，传路径会直接报错），

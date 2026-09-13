@@ -42,10 +42,19 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      # tauri-build 的 build.rs 会校验 externalBin（渲染 helper）存在，
-      # 该二进制不入库，冷检出的 CI 需要先构建并 stage 它。
-      - name: Stage document renderer helper (sidecar)
-        run: node scripts/ensure-sidecar.mjs
+      # tauri-build 的 build.rs 会校验 externalBin（渲染 helper）与
+      # resources（pdfium/*）的 glob，二者均不入库，冷检出的 CI 需要先
+      # 下载 pdfium 并构建 stage helper。
+      - name: Download PDFium runtime (Windows x64)
+        run: |
+          curl.exe -sSL -o pdfium-win-x64.tgz https://github.com/bblanchon/pdfium-binaries/releases/latest/download/pdfium-win-x64.tgz
+          mkdir pdfium-dist
+          tar -xzf pdfium-win-x64.tgz -C pdfium-dist
+          echo "PDFIUM_BIN_DIR=${{ github.workspace }}/pdfium-dist/lib" >> $env:GITHUB_ENV
+      - name: Stage PDFium and document renderer helper (sidecar)
+        run: |
+          node scripts/stage-pdfium.mjs
+          node scripts/ensure-sidecar.mjs
       - name: Format check
         run: cargo fmt --manifest-path src-tauri/Cargo.toml -- --check
       - name: Clippy
