@@ -70,7 +70,7 @@ pub(super) fn render_cover_tile(
                 anyhow::bail!("JPEG CMYK 像素缓冲尺寸无效");
             }
             let mut rgb = Vec::with_capacity(expected / 4 * 3);
-            for pixel in pixels.chunks_exact(4) {
+            for pixel in pixels.as_chunks::<4>().0 {
                 let c = pixel[0] as u16;
                 let m = pixel[1] as u16;
                 let y = pixel[2] as u16;

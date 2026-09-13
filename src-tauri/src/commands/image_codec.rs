@@ -91,7 +91,7 @@ pub(crate) fn decode_jpeg(path: &Path, color_mode: &str) -> Result<DynamicImage>
         }
         PixelFormat::CMYK32 => {
             let mut rgb = Vec::with_capacity(checked_image_buffer_bytes(width, height, 3)?);
-            for pixel in pixels.chunks_exact(4) {
+            for pixel in pixels.as_chunks::<4>().0 {
                 let c = u16::from(pixel[0]);
                 let m = u16::from(pixel[1]);
                 let y = u16::from(pixel[2]);

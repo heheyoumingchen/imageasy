@@ -415,7 +415,7 @@ fn decode_pdf_cmyk_jpeg(bytes: &[u8]) -> Result<DynamicImage> {
     let height = info.height as u32;
 
     let mut rgb_buf = Vec::with_capacity((width as usize) * (height as usize) * 3);
-    for chunk in pixels.chunks_exact(4) {
+    for chunk in pixels.as_chunks::<4>().0 {
         let c = chunk[0] as u32;
         let m = chunk[1] as u32;
         let y = chunk[2] as u32;
@@ -462,7 +462,7 @@ fn extract_pdf_image_output(
                 Some(b"DeviceCMYK") => {
                     let pixel_count = (width * height) as usize;
                     let mut rgb_buf = Vec::with_capacity(pixel_count * 3);
-                    for chunk in decoded.chunks_exact(4) {
+                    for chunk in decoded.as_chunks::<4>().0 {
                         let (c, m, y, k) = (
                             chunk[0] as u16,
                             chunk[1] as u16,
