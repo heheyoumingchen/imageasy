@@ -46,12 +46,16 @@ jobs:
       # resources（pdfium/*）的 glob，二者均不入库，冷检出的 CI 需要先
       # 下载 pdfium 并构建 stage helper。
       - name: Download PDFium runtime (Windows x64)
+        shell: bash
         run: |
-          curl.exe -sSL -o pdfium-win-x64.tgz https://github.com/bblanchon/pdfium-binaries/releases/latest/download/pdfium-win-x64.tgz
+          curl -fsSL -o pdfium-win-x64.tgz https://github.com/bblanchon/pdfium-binaries/releases/latest/download/pdfium-win-x64.tgz
           mkdir pdfium-dist
           tar -xzf pdfium-win-x64.tgz -C pdfium-dist
-          echo "PDFIUM_BIN_DIR=${{ github.workspace }}/pdfium-dist/lib" >> $env:GITHUB_ENV
+          # Windows 包的 DLL 在 bin/（macOS 包在 lib/），stage 脚本按平台取对应文件名
+          test -f pdfium-dist/bin/pdfium.dll
+          echo "PDFIUM_BIN_DIR=$GITHUB_WORKSPACE/pdfium-dist/bin" >> "$GITHUB_ENV"
       - name: Stage PDFium and document renderer helper (sidecar)
+        shell: bash
         run: |
           node scripts/stage-pdfium.mjs
           node scripts/ensure-sidecar.mjs
